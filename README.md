@@ -2,6 +2,48 @@
 
 本仓库用于实现课程 OJ 大作业。规划依据 [`oj/index.md`](oj/index.md)、[`oj/api.md`](oj/api.md)、各 Step 实验说明及 [`oj/requirements.md`](oj/requirements.md) 制定。目标是在验收前交付一个可运行、可演示、接口行为一致的小型 Online Judge，并预留 AI 智能命题扩展。
 
+## 当前实现：P0 基础设施
+
+当前代码已经提供 FastAPI 应用工厂、异步 SQLite 连接与迁移、统一响应和异常处理、请求日志、健康检查以及测试专用 reset。题目、用户、提交、评测器和 Streamlit 页面将在后续 Step 中实现。
+
+### 创建环境并运行
+
+以下命令均在仓库根目录执行：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pytest
+.venv/bin/python -m uvicorn app.main:app --reload
+```
+
+第一条创建项目专用 Python 环境；第二条只向 `.venv` 安装依赖；第三条运行测试；第四条启动开发服务器。启动后访问 `http://127.0.0.1:8000/health`，预期得到：
+
+```json
+{"code":200,"msg":"success","data":{"status":"healthy","database":"ok"}}
+```
+
+复制 `.env.example` 为 `.env` 可覆盖配置。支持的变量如下：
+
+| 变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `OJ_ENVIRONMENT` | `development` | 运行环境：`development`、`test` 或 `production` |
+| `OJ_DATABASE_PATH` | `data/oj.db` | SQLite 数据库文件路径 |
+| `OJ_LOG_LEVEL` | `INFO` | Python 日志级别 |
+| `OJ_TEST_RESET_ENABLED` | `false` | 是否启用测试 reset；还必须同时处于 `test` 环境 |
+
+运行时数据库、`.env`、虚拟环境、日志和评测临时文件均已加入 `.gitignore`。不要把密码、Session、模型密钥或用户代码写入环境模板和日志。
+
+### P0 接口与分层
+
+- `GET /health`：检查应用与 SQLite 是否可用。
+- `POST /api/reset/`：当前仅当 `OJ_ENVIRONMENT=test` 且 `OJ_TEST_RESET_ENABLED=true` 时可用；其他环境返回 404。Step 4 将补充管理员鉴权、Session 清理和初始管理员重建。
+- `app/api/` 只负责请求和响应编排，`app/services/` 放业务规则，`app/repositories/` 负责持久化。
+- FastAPI lifespan 在服务接收请求前执行迁移；`schema_migrations` 保证同一迁移只执行一次。
+- 数据库事务成功时提交，异常时回滚；路由等待 `aiosqlite` 时不会用同步磁盘调用阻塞事件循环。
+
+排查方法：启动失败时先检查依赖是否安装在 `.venv`；健康检查返回 500 时检查数据库目录是否可写；测试 reset 返回 404 时检查两个测试配置是否同时启用。错误响应不会返回内部异常文本，可结合服务端记录的请求 ID 和异常类型定位。
+
 ## 1. 交付目标与边界
 
 ### 课程交付与硬性限制

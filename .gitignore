@@ -1,1 +1,22 @@
 oj/
+
+# Local Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local configuration and runtime data
+.env
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Judge workspaces and compiled artifacts
+.judge-tmp/
+*.o
+*.out
