@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/oj.db")
     log_level: str = "INFO"
     test_reset_enabled: bool = False
+    session_cookie_name: str = "oj_session"
+    session_ttl_seconds: int = 86400
 
     model_config = SettingsConfigDict(
         # 未设置环境变量时读取本地 .env；示例文件本身不会被自动读取。

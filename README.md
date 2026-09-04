@@ -4,7 +4,7 @@
 
 ## 当前实现：P0 基础设施
 
-当前代码已经提供 FastAPI 应用工厂、异步 SQLite 连接与迁移、统一响应和异常处理、请求日志、健康检查以及测试专用 reset。题目、用户、提交、评测器和 Streamlit 页面将在后续 Step 中实现。
+当前代码已经提供 FastAPI 应用工厂、异步 SQLite 连接与迁移、统一响应和异常处理、请求日志、健康检查、测试专用 reset，以及 Step 4 的用户注册、Session 认证和角色管理。题目、提交、评测器和 Streamlit 页面将在后续 Step 中实现。
 
 ### 创建环境并运行
 
@@ -31,18 +31,31 @@ python3 -m venv .venv
 | `OJ_DATABASE_PATH` | `data/oj.db` | SQLite 数据库文件路径 |
 | `OJ_LOG_LEVEL` | `INFO` | Python 日志级别 |
 | `OJ_TEST_RESET_ENABLED` | `false` | 是否启用测试 reset；还必须同时处于 `test` 环境 |
+| `OJ_SESSION_COOKIE_NAME` | `oj_session` | 浏览器保存 Session 令牌的 Cookie 名 |
+| `OJ_SESSION_TTL_SECONDS` | `86400` | Session 有效秒数，默认 24 小时 |
 
 运行时数据库、`.env`、虚拟环境、日志和评测临时文件均已加入 `.gitignore`。不要把密码、Session、模型密钥或用户代码写入环境模板和日志。
 
 ### P0 接口与分层
 
 - `GET /health`：检查应用与 SQLite 是否可用。
-- `POST /api/reset/`：当前仅当 `OJ_ENVIRONMENT=test` 且 `OJ_TEST_RESET_ENABLED=true` 时可用；其他环境返回 404。Step 4 将补充管理员鉴权、Session 清理和初始管理员重建。
+- `POST /api/reset/`：仅当 `OJ_ENVIRONMENT=test` 且 `OJ_TEST_RESET_ENABLED=true` 时可用；其他环境返回 404。重置会清理 Session Cookie 并重建初始管理员；正式管理员鉴权将在该测试接口需要开放到非测试环境时补充。
+- `POST /api/users/`、`POST /api/auth/login`、`POST /api/auth/logout`：注册、登录与登出。
+- `GET /api/users/{user_id}`：本人或管理员查询用户资料。
+- `GET /api/users/`、`POST /api/users/admin`、`PUT /api/users/{user_id}/role`：管理员用户管理。
 - `app/api/` 只负责请求和响应编排，`app/services/` 放业务规则，`app/repositories/` 负责持久化。
 - FastAPI lifespan 在服务接收请求前执行迁移；`schema_migrations` 保证同一迁移只执行一次。
 - 数据库事务成功时提交，异常时回滚；路由等待 `aiosqlite` 时不会用同步磁盘调用阻塞事件循环。
 
 排查方法：启动失败时先检查依赖是否安装在 `.venv`；健康检查返回 500 时检查数据库目录是否可写；测试 reset 返回 404 时检查两个测试配置是否同时启用。错误响应不会返回内部异常文本，可结合服务端记录的请求 ID 和异常类型定位。
+
+### Session 与用户权限
+
+系统启动时幂等创建 `admin/admintestpassword`。登录成功后，浏览器 Cookie 保存随机原始令牌，SQLite 只保存令牌的 SHA-256 摘要、用户 ID 和过期时间；密码经过 SHA-256 预处理后使用 bcrypt 慢哈希，数据库和普通响应均不保存明文密码。Cookie 设置 `HttpOnly` 和 `SameSite=Lax`，生产环境额外启用 `Secure`。
+
+用户名去除首尾空白后保存，并使用 `casefold` 键实现大小写无关登录和唯一性。管理员不能通过角色接口修改自己的角色，该操作返回 409，避免唯一管理员误操作后使系统失去管理入口。用户被改为 `banned` 时会删除其全部 Session；其已有请求随后返回 401，再次登录返回 403。
+
+认证请求的数据流为：路由读取 Cookie → 认证服务计算令牌摘要 → Repository 联查 Session 与用户 → 权限依赖判断角色 → 路由返回不含密码的公开字段。未登录是 401，已经登录但角色不足是 403。
 
 ## 1. 交付目标与边界
 

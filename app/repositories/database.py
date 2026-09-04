@@ -23,8 +23,51 @@ class Migration:
     statements: tuple[str, ...] = ()
 
 
-# P0 只登记基础版本；后续业务表应通过追加新版本创建，不能修改旧迁移。
-MIGRATIONS = (Migration(version=1, name="bootstrap"),)
+# 已发布迁移只允许追加，不能改写，否则旧数据库和新数据库会得到不同结构。
+MIGRATIONS = (
+    Migration(version=1, name="bootstrap"),
+    Migration(
+        version=2,
+        name="add_users_and_sessions",
+        statements=(
+            """
+            CREATE TABLE users (
+                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                username_key TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK (role IN ('user', 'admin', 'banned')),
+                join_time TEXT NOT NULL,
+                submit_count INTEGER NOT NULL DEFAULT 0 CHECK (submit_count >= 0),
+                resolve_count INTEGER NOT NULL DEFAULT 0 CHECK (resolve_count >= 0)
+            )
+            """,
+            """
+            CREATE TABLE sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX sessions_user_id_idx ON sessions(user_id)",
+            "CREATE INDEX sessions_expires_at_idx ON sessions(expires_at)",
+            """
+            CREATE TABLE user_role_audits (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_user_id INTEGER NOT NULL,
+                target_user_id INTEGER NOT NULL,
+                old_role TEXT NOT NULL,
+                new_role TEXT NOT NULL,
+                changed_at TEXT NOT NULL,
+                FOREIGN KEY (actor_user_id) REFERENCES users(user_id),
+                FOREIGN KEY (target_user_id) REFERENCES users(user_id)
+            )
+            """,
+        ),
+    ),
+)
 
 
 class Database:
