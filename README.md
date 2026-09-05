@@ -4,7 +4,7 @@
 
 ## 当前实现：P0 基础设施
 
-当前代码已经提供 FastAPI 应用工厂、异步 SQLite 连接与迁移、统一响应和异常处理、请求日志、健康检查、测试专用 reset，以及 Step 4 的用户注册、Session 认证和角色管理。题目、提交、评测器和 Streamlit 页面将在后续 Step 中实现。
+当前代码已经提供 FastAPI 应用工厂、异步 SQLite 连接与迁移、统一响应和异常处理、请求日志、健康检查、测试专用 reset、Step 4 用户与 Session，以及 Step 1 题目 JSON 管理。提交、评测器和 Streamlit 页面将在后续 Step 中实现。
 
 ### 创建环境并运行
 
@@ -29,6 +29,7 @@ python3 -m venv .venv
 | --- | --- | --- |
 | `OJ_ENVIRONMENT` | `development` | 运行环境：`development`、`test` 或 `production` |
 | `OJ_DATABASE_PATH` | `data/oj.db` | SQLite 数据库文件路径 |
+| `OJ_PROBLEMS_PATH` | `data/problems` | 每题一个 JSON 的题目配置目录 |
 | `OJ_LOG_LEVEL` | `INFO` | Python 日志级别 |
 | `OJ_TEST_RESET_ENABLED` | `false` | 是否启用测试 reset；还必须同时处于 `test` 环境 |
 | `OJ_SESSION_COOKIE_NAME` | `oj_session` | 浏览器保存 Session 令牌的 Cookie 名 |
@@ -56,6 +57,18 @@ python3 -m venv .venv
 用户名去除首尾空白后保存，并使用 `casefold` 键实现大小写无关登录和唯一性。管理员不能通过角色接口修改自己的角色，该操作返回 409，避免唯一管理员误操作后使系统失去管理入口。用户被改为 `banned` 时会删除其全部 Session；其已有请求随后返回 401，再次登录返回 403。
 
 认证请求的数据流为：路由读取 Cookie → 认证服务计算令牌摘要 → Repository 联查 Session 与用户 → 权限依赖判断角色 → 路由返回不含密码的公开字段。未登录是 401，已经登录但角色不足是 403。
+
+### Step 1 题目管理
+
+题目接口为 `GET/POST /api/problems/` 和 `GET/PUT/DELETE /api/problems/{problem_id}`。所有操作都需要登录，新增、查看和编辑允许普通用户执行，删除只允许管理员执行。列表只返回 `id/title`，详情返回完整题目配置。
+
+题目 ID、标题、描述、输入输出说明和约束必须是非空字符串；`samples`、`testcases` 必须各有至少一项，每项必须提供字符串 `input/output`。测试点文本允许为空，以支持无输入或空输出题目。可选字符串缺省返回 `""`，标签缺省返回 `[]`。
+
+JSON 内未设置 `time_limit/memory_limit` 时保留 `null`，供 Step 2 继承语言默认限制；Step 1 详情接口按 API 文档展示 `3.0` 秒和 `128` MB。`public_cases` 是 Step 5 管理的内部字段，普通题目编辑会保留它且不会在 Step 1 响应中公开。
+
+磁盘文件名是题目 ID 的 SHA-256 摘要，用户输入不能构造目录路径。写入先完成同目录临时文件，再使用原子替换发布；文件操作通过工作线程执行，避免阻塞 FastAPI 事件循环。应用启动会校验全部 JSON，损坏配置会阻止启动，而不会静默漏掉题目。
+
+手动验收可在 `/docs` 依次执行：登录 → 新增题目 → 查看列表 → 查看详情 → 编辑 → 管理员删除。预期重复 ID 返回 409、路径 ID 与正文 ID 不一致返回 400、不存在返回 404、普通用户删除返回 403、匿名请求返回 401。
 
 ## 1. 交付目标与边界
 

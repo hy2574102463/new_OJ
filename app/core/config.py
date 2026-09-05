@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     database_path: Path = Path("data/oj.db")
+    problems_path: Path = Path("data/problems")
     log_level: str = "INFO"
     test_reset_enabled: bool = False
     session_cookie_name: str = "oj_session"

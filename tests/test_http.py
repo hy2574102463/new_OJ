@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from app.api.auth import router as auth_router
+from app.api.problems import router as problems_router
 from app.api.system import router as system_router
 from app.api.users import router as users_router
 from app.core.config import Settings
@@ -119,7 +120,7 @@ def test_database_failure_does_not_leak_details(client: TestClient) -> None:
 def test_public_application_routes_are_async() -> None:
     """课程要求所有公开业务路由都必须使用 async def。"""
 
-    routers = (system_router, auth_router, users_router)
+    routers = (system_router, auth_router, users_router, problems_router)
     routes = [
         route
         for router in routers
