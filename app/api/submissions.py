@@ -6,6 +6,7 @@ from app.api.dependencies import get_current_user, require_admin
 from app.core.exceptions import AppError
 from app.models.users import UserRecord
 from app.schemas.responses import response_body
+from app.schemas.logs import submission_log_data
 from app.schemas.submissions import (
     SubmissionPayload,
     submission_detail_data,
@@ -76,6 +77,22 @@ async def rejudge_submission(
         "rejudge started",
         {"submission_id": str(submission.submission_id), "status": "pending"},
     )
+
+
+@router.get("/{submission_id}/log")
+async def get_submission_log(
+    submission_id: str,
+    request: Request,
+    current_user: UserRecord = Depends(get_current_user),
+) -> dict[str, object]:
+    """返回当前身份获准查看的测试点明细，并记录成功或拒绝访问。"""
+
+    if not submission_id.isdecimal() or int(submission_id) <= 0:
+        raise AppError(400, "invalid submission id")
+    submission, details = await request.app.state.log_service.get_submission_log(
+        int(submission_id), current_user
+    )
+    return response_body(200, "success", submission_log_data(submission, details))
 
 
 @router.get("/{submission_id}")

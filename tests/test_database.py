@@ -24,8 +24,8 @@ async def test_initialize_applies_each_migration_once(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_existing_p0_database_upgrades_to_user_schema(tmp_path: Path) -> None:
-    """已有 migration 1 的数据库启动时应只补做新的用户迁移。"""
+async def test_existing_p0_database_upgrades_to_current_schema(tmp_path: Path) -> None:
+    """已有 migration 1 的数据库启动时应补做全部后续迁移。"""
 
     database = Database(tmp_path / "oj.db")
     async with database.connection() as connection:
@@ -54,9 +54,15 @@ async def test_existing_p0_database_upgrades_to_user_schema(tmp_path: Path) -> N
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'"
         )
         users_table = await cursor.fetchone()
+        cursor = await connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'log_access_audits'"
+        )
+        audits_table = await cursor.fetchone()
 
-    assert versions == [1, 2, 3, 4]
+    assert versions == [1, 2, 3, 4, 5]
     assert users_table is not None
+    assert audits_table is not None
 
 
 @pytest.mark.asyncio
@@ -103,6 +109,7 @@ async def test_reset_removes_application_tables_and_reapplies_migrations(
     assert names == [
         "case_results",
         "languages",
+        "log_access_audits",
         "schema_migrations",
         "sessions",
         "submissions",

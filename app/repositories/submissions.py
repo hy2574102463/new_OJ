@@ -5,7 +5,7 @@ from datetime import datetime
 import aiosqlite
 
 from app.judge.models import JudgeResult
-from app.models.submissions import SubmissionRecord, SubmissionStatus
+from app.models.submissions import CaseResultRecord, SubmissionRecord, SubmissionStatus
 from app.repositories.database import Database
 
 
@@ -92,6 +92,30 @@ class SubmissionRepository:
         async with self.database.connection() as connection:
             row = await self._fetch_by_id(connection, submission_id)
         return self._to_submission(row) if row is not None else None
+
+    async def get_case_results(self, submission_id: int) -> list[CaseResultRecord]:
+        """读取一次评测的测试点指标，并按从 1 开始的序号稳定排序。"""
+
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT case_index, result, time_seconds, memory_mb
+                FROM case_results
+                WHERE submission_id = ?
+                ORDER BY case_index
+                """,
+                (submission_id,),
+            )
+            rows = await cursor.fetchall()
+        return [
+            CaseResultRecord(
+                case_index=int(row["case_index"]),
+                result=str(row["result"]),
+                time_seconds=float(row["time_seconds"]),
+                memory_mb=float(row["memory_mb"]),
+            )
+            for row in rows
+        ]
 
     async def list_submissions(
         self,

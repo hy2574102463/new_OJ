@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
 from app.api.languages import router as languages_router
+from app.api.logs import router as logs_router
 from app.api.problems import router as problems_router
 from app.api.submissions import router as submissions_router
 from app.api.system import router as system_router
@@ -17,11 +18,13 @@ from app.core.logging import configure_logging
 from app.judge.runner import JudgeRunner
 from app.repositories.database import Database
 from app.repositories.languages import LanguageRepository
+from app.repositories.logs import LogRepository
 from app.repositories.problems import ProblemRepository
 from app.repositories.submissions import SubmissionRepository
 from app.repositories.users import UserRepository
 from app.services.auth import AuthService
 from app.services.languages import LanguageService
+from app.services.logs import LogService
 from app.services.problems import ProblemService
 from app.services.submissions import SubmissionService
 from app.services.system import SystemService
@@ -42,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     user_repository = UserRepository(database)
     language_repository = LanguageRepository(database)
     submission_repository = SubmissionRepository(database)
+    log_repository = LogRepository(database)
     auth_service = AuthService(resolved_settings, user_repository)
     user_service = UserService(auth_service, user_repository)
     problem_service = ProblemService(problem_repository)
@@ -51,6 +55,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         problem_repository,
         language_repository,
         JudgeRunner(resolved_settings.judge_workspace_path),
+    )
+    log_service = LogService(
+        submission_repository, problem_repository, log_repository
     )
 
     @asynccontextmanager
@@ -78,6 +85,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.language_service = language_service
     application.state.submission_repository = submission_repository
     application.state.submission_service = submission_service
+    application.state.log_repository = log_repository
+    application.state.log_service = log_service
     application.state.auth_service = auth_service
     application.state.user_service = user_service
     application.state.system_service = SystemService(
@@ -94,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(users_router)
     application.include_router(languages_router)
     application.include_router(submissions_router)
+    application.include_router(logs_router)
     application.include_router(problems_router)
     return application
 

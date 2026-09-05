@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.dependencies import get_current_user, require_admin
 from app.models.users import UserRecord
-from app.schemas.problems import ProblemPayload, problem_detail_data
+from app.schemas.problems import LogVisibilityUpdate, ProblemPayload, problem_detail_data
 from app.schemas.responses import response_body
 
 router = APIRouter(prefix="/api/problems", tags=["problems"])
@@ -32,6 +32,25 @@ async def create_problem(
 
     problem = await request.app.state.problem_service.create_problem(payload)
     return response_body(200, "add success", {"id": problem.id})
+
+
+@router.put("/{problem_id:path}/log_visibility")
+async def update_log_visibility(
+    problem_id: str,
+    payload: LogVisibilityUpdate,
+    request: Request,
+    _admin: UserRecord = Depends(require_admin),
+) -> dict[str, object]:
+    """仅管理员可切换指定题目测试点日志是否对登录用户公开。"""
+
+    problem = await request.app.state.problem_service.update_log_visibility(
+        problem_id, payload.public_cases
+    )
+    return response_body(
+        200,
+        "log visibility updated",
+        {"problem_id": problem.id, "public_cases": problem.public_cases},
+    )
 
 
 @router.get("/{problem_id:path}")

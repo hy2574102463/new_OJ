@@ -55,3 +55,14 @@ class ProblemService:
         if not await self.problems.delete(normalized_id):
             raise AppError(404, "problem not found")
         return normalized_id
+
+    async def update_log_visibility(
+        self, problem_id: str, public_cases: bool
+    ) -> StoredProblem:
+        """更新清理后题目 ID 的日志公开策略，不存在时返回 404。"""
+
+        normalized_id = problem_id.strip()
+        problem = await self.problems.update_visibility(normalized_id, public_cases)
+        if problem is None:
+            raise AppError(404, "problem not found")
+        return problem

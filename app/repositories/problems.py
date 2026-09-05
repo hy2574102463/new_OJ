@@ -86,6 +86,23 @@ class ProblemRepository:
             await asyncio.to_thread(self._write_sync, path, updated)
             return True
 
+    async def update_visibility(
+        self, problem_id: str, public_cases: bool
+    ) -> StoredProblem | None:
+        """在同一文件锁内只更新日志策略，保留题目的全部其他字段。"""
+
+        path = self._path_for_id(problem_id)
+        async with self._lock:
+            existing = await asyncio.to_thread(
+                self._read_if_exists_sync, path, problem_id
+            )
+            if existing is None:
+                return None
+            updated = existing.model_copy(update={"public_cases": public_cases})
+            # JSON 写入和 fsync 是阻塞操作，继续放在线程池中执行。
+            await asyncio.to_thread(self._write_sync, path, updated)
+            return updated
+
     async def delete(self, problem_id: str) -> bool:
         """删除指定题目文件；不存在返回 False，其他文件错误向上传播。"""
 

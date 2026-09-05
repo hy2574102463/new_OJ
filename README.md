@@ -4,7 +4,7 @@
 
 ## 当前实现状态
 
-截至 2026-09-05，基础设施、Step 4 用户认证、Step 1 题目管理、Step 2 评测控制和 Step 3 评测管理已经完成；Step 3 当前位于未提交工作区，评测日志和 Streamlit 页面尚未实现：
+截至 2026-09-05，基础设施、Step 4 用户认证以及 Step 1、2、3 已提交完成；Step 5 与 Step 6 已在当前工作区完成：
 
 | 阶段 | 状态 | 基线提交 | 已验证内容 |
 | --- | --- | --- | --- |
@@ -12,19 +12,20 @@
 | Step 4 用户管理 | 已完成 | `896261e` | 注册、Session 登录/登出、bcrypt、角色权限、初始管理员 |
 | Step 1 题目管理 | 已完成 | `cce992e` | JSON CRUD、字段默认值、原子写入、启动校验、权限控制 |
 | Step 2 评测控制 | 已完成 | `1cb223d` | Python/C++、语言注册、异步提交、AC/WA/RE/CE/TLE/MLE |
-| Step 3 评测管理 | 已完成、待提交 | `1cb223d` 后工作区 | 组合筛选、分页、详情权限和原 ID 重判 |
-| Step 5/6 | 未开始 | - | 日志审计、Streamlit 前端 |
+| Step 3 评测管理 | 已完成 | `ddb97dd` | 组合筛选、分页、详情权限和原 ID 重判 |
+| Step 5 评测日志 | 已完成、待提交 | 当前工作区 | 测试点明细、公开策略和访问审计 |
+| Step 6 | 已完成、待提交 | 当前工作区 | Streamlit API 客户端、账户/题目/提交与管理员页面 |
 | Advance | 可选、未开始 | - | AI 配置、任务进度、取消和费用统计 |
 
-当前完整测试基线是 **78 passed, 2 warnings**。两条 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。Step 3 新增覆盖包括分页参数组合、用户/题目/状态筛选、列表字段裁剪、越权优先级、原 ID 重判、旧测试点清理和用户统计修正。
+当前完整测试基线是 **106 passed, 2 warnings**。Step 6 新增客户端、会话状态、表单转换和 Streamlit `AppTest` 覆盖；两条既有 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。
 
-下一步是 Step 5，提供测试点日志查询、题目日志可见性和访问审计。实现时复用已有 case_results，但不能通过列表或普通详情绕过 Step 5 权限读取测试点明细。
+下一步是验收准备，或按需进入可选 Advance。前端只保存 Session Cookie 并调用现有 HTTP 接口，不直接读取 SQLite 或题目 JSON。
 
 ### 当前已知边界
 
 - 题目文件的并发锁仅在单个应用进程内生效；当前阶段不支持多个 Uvicorn worker 同时写同一道题。
 - `POST /api/reset/` 只允许测试环境使用，会清空测试数据并重建初始管理员，不能作为生产管理接口。
-- 当前已实现提交创建、列表、详情和重判；测试点日志、公开策略和访问审计接口仍不可用。
+- Streamlit 进程重启会丢失其内存中的浏览器会话客户端，用户需要重新登录；Cookie 不写入本地文件。
 - 评测隔离是适合课程验收的进程工作目录、进程组清理和资源监控，不等同于容器或虚拟机安全边界；不要把服务直接暴露给不受信任的公网用户。
 - 默认管理员凭据只用于课程初始验收；部署到真实环境前必须增加安全的改密或初始化流程。
 
@@ -37,9 +38,10 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m pytest
 .venv/bin/python -m uvicorn app.main:app --reload
+.venv/bin/python -m streamlit run app/frontend/app.py
 ```
 
-第一条创建项目专用 Python 环境；第二条只向 `.venv` 安装依赖；第三条运行测试；第四条启动开发服务器。启动后访问 `http://127.0.0.1:8000/health`，预期得到：
+第一条创建项目专用 Python 环境；第二条只向 `.venv` 安装依赖；第三条运行测试。第四条启动 FastAPI，保持该终端运行后，在另一个终端执行第五条启动 Streamlit。后端健康检查地址是 `http://127.0.0.1:8000/health`，前端默认地址是 `http://127.0.0.1:8501`。
 
 ```json
 {"code":200,"msg":"success","data":{"status":"healthy","database":"ok"}}
@@ -57,6 +59,7 @@ python3 -m venv .venv
 | `OJ_TEST_RESET_ENABLED` | `false` | 是否启用测试 reset；还必须同时处于 `test` 环境 |
 | `OJ_SESSION_COOKIE_NAME` | `oj_session` | 浏览器保存 Session 令牌的 Cookie 名 |
 | `OJ_SESSION_TTL_SECONDS` | `86400` | Session 有效秒数，默认 24 小时 |
+| `OJ_API_BASE_URL` | `http://127.0.0.1:8000` | Streamlit 连接的 FastAPI 基础地址，仅由部署环境配置 |
 
 运行时数据库、`.env`、虚拟环境、日志和评测临时文件均已加入 `.gitignore`。不要把密码、Session、模型密钥或用户代码写入环境模板和日志。
 
@@ -70,6 +73,7 @@ python3 -m venv .venv
 - `app/api/` 只负责请求和响应编排，`app/services/` 放业务规则，`app/repositories/` 负责持久化。
 - `GET/POST /api/languages/`：查询或由登录用户注册安全的语言命令模板。
 - `POST/GET /api/submissions/`、`GET /api/submissions/{submission_id}`、`PUT /api/submissions/{submission_id}/rejudge`：提交、筛选分页、详情轮询和管理员重判。
+- `GET /api/submissions/{submission_id}/log`、`PUT /api/problems/{problem_id}/log_visibility`、`GET /api/logs/access/`：授权查看测试点、配置公开策略和管理员查询访问审计。
 - FastAPI lifespan 在服务接收请求前执行迁移；`schema_migrations` 保证同一迁移只执行一次。
 - 数据库事务成功时提交，异常时回滚；路由等待 `aiosqlite` 时不会用同步磁盘调用阻塞事件循环。
 
@@ -129,6 +133,24 @@ curl -b admin-cookies.txt -X PUT http://127.0.0.1:8000/api/submissions/1/rejudge
 
 列表应返回 `total/submissions`；重判立即返回原 ID 和 pending，随后详情重新变为 success 或 error。
 
+### Step 5 评测日志
+
+SQLite 迁移 5 保存 `view_logs` 访问审计；测试点结果继续复用迁移 4 的 `case_results`。读取日志时，服务先确认提交和题目存在，再按“管理员、提交本人或题目已公开”判断权限；既有资源的成功和拒绝访问分别记录 `200/403`，匿名、非法 ID 和不存在资源不记录。
+
+`GET /api/submissions/{submission_id}/log` 只返回测试点的 `id/result/time/memory` 以及 `score/counts`，不返回源码、测试输入输出、实际输出、绝对路径或内部异常。pending 任务返回空 `details` 和空汇总字段。即使管理员通过 `PUT /api/problems/{problem_id}/log_visibility` 设置 `public_cases=true`，其他登录用户也只获得日志明细权限，原 Step 2/3 提交详情仍为 403。
+
+管理员可通过 `GET /api/logs/access/` 按 `user_id/problem_id` 筛选。两项均缺省时查询全部；分页仍遵循“都缺省查全部、仅 `page_size` 查第一页、仅 `page` 返回 400”。列表按审计 ID 升序，查询审计接口自身不会再产生审计记录。
+
+### Step 6 Streamlit 前端
+
+入口 `app/frontend/app.py` 使用 `st.navigation` 提供中文原生多页面。账户页始终可见；登录后显示题目和提交页；管理员额外看到用户管理和访问审计。题目页覆盖列表、详情、完整新增/编辑、删除及日志公开设置；提交页覆盖源码提交、筛选分页、详情、逐测试点日志和管理员重判。
+
+每个 Streamlit 浏览器会话在 `st.session_state` 中持有一个独立的 `requests.Session`。登录响应设置的 HttpOnly Cookie 由该 Session 在内存中保存并自动带给后续 FastAPI 请求，不写磁盘。401 会清 Cookie、公开用户资料和私有页面选择；主动登出即使遇到断网也清理前端状态，同时提示后端 Session 可能等待自然过期。客户端使用 3 秒连接、15 秒读取超时，并验证 HTTP 状态与 `{code,msg,data}` 信封一致。
+
+提交创建后，活动 ID 在 `pending` 时由 Streamlit fragment 每秒轮询；进入 `success` 或 `error` 后停止。任务状态与测试点判定分开显示：`success` 表示评测任务正常完成，测试点仍可能是 `WA/TLE/MLE/RE/CE`。题目详情不返回内部限制是否为 `null`，因此编辑页面不会猜测继承状态，而要求保存时明确选择继承或固定值；日志公开状态同样通过明确的“公开/私有”命令设置。
+
+手动演示流程：先启动两个服务，使用初始管理员登录，新增一道含测试点的题目；注册并登录普通用户，提交 Python 或 C++ 源码，在结果详情观察 `pending` 转终态并查看日志；最后用管理员执行重判、角色修改和访问审计。401/403 等后端错误应显示中文安全提示，页面不应出现 Cookie、密码、源码、服务器绝对路径或内部堆栈。
+
 ## 1. 交付目标与边界
 
 ### 课程交付与硬性限制
@@ -184,11 +206,11 @@ tests/                    # API、权限、评测器和前端冒烟测试
 | --- | --- | --- | --- |
 | P0 基础设施 | 已完成 | 环境、配置、目录、统一响应/异常、数据库迁移、日志脱敏、启动脚本 | 本地可启动，健康检查和 reset 可用 |
 | P1 Step 1 | 已完成 | 题目模型、JSON 仓库、CRUD API、字段默认值和冲突校验 | 登录后可完整维护题目，非法请求返回 400/409 |
-| P2 Step 2 | 已完成、待提交 | Python/C++ 运行器、输出比较、异步任务、语言注册、超时/内存监控 | 已通过自动化 AC/WA/RE/CE/TLE/MLE 与脱敏测试 |
-| P3 Step 3 | 已完成、待提交 | 列表筛选分页、详情权限、管理员 rejudge | 已验证原 ID pending→success/error、字段裁剪和统计一致性 |
+| P2 Step 2 | 已完成 | Python/C++ 运行器、输出比较、异步任务、语言注册、超时/内存监控 | 已通过自动化 AC/WA/RE/CE/TLE/MLE 与脱敏测试 |
+| P3 Step 3 | 已完成 | 列表筛选分页、详情权限、管理员 rejudge | 已验证原 ID pending→success/error、字段裁剪和统计一致性 |
 | P4 Step 4 | 已完成 | bcrypt 密码、Session 登录登出、角色依赖、禁用用户、用户接口 | 未登录 401、越权 403，初始 `admin/admintestpassword` 自动创建 |
-| P5 Step 5 | 未开始 | CaseResult 日志、题目 `public_cases`、访问审计接口 | 本人/管理员/公开场景可见性与审计状态正确 |
-| P6 Step 6 | 未开始 | Streamlit 三组页面、统一 API 客户端、会话和轮询 | 页面不绕过 API，能完成注册→建题→提交→看结果闭环 |
+| P5 Step 5 | 已完成、待提交 | CaseResult 日志、题目 `public_cases`、访问审计接口 | 本人/管理员/公开场景可见性与审计状态正确 |
+| P6 Step 6 | 已完成、待提交 | Streamlit 三组页面、统一 API 客户端、会话和轮询 | 页面不绕过 API，能完成注册→建题→提交→看结果闭环 |
 | P7 Advance（可选） | 未开始 | AI 配置、后台任务、进度/SSE 或轮询、取消、用量计费、结果导入题目表单 | 任务可观察、可中断，密钥不回显，费用依据可解释 |
 | P8 验收 | 未开始 | 集成测试、边界/安全测试、演示数据、报告和提交检查 | 覆盖评分点，Conventional Commits，9 月 10 日前提交 commit 与报告 |
 
@@ -221,7 +243,7 @@ tests/                    # API、权限、评测器和前端冒烟测试
 
 ## 6. 运行与提交约定
 
-具体命令以最终实现为准，至少提供 FastAPI（如 `uvicorn app.main:app --reload`）和 Streamlit（如 `streamlit run app/frontend.py`）启动方式及依赖文件。运行时数据、编译产物、模型密钥和大文件不得提交 Git；提交信息遵循 Conventional Commits。截止节点以指南为准：9 月 10 日课前完成代码并提交最后一次 commit，报告于当日 23:59 前提交。
+FastAPI 使用 `.venv/bin/python -m uvicorn app.main:app --reload` 启动；Streamlit 使用 `.venv/bin/python -m streamlit run app/frontend/app.py` 启动。运行时数据、编译产物、模型密钥和大文件不得提交 Git；提交信息遵循 Conventional Commits。截止节点以指南为准：9 月 10 日课前完成代码并提交最后一次 commit，报告于当日 23:59 前提交。
 
 AI 进阶输入应能表达知识点、预期难度和其他约束，结果须可用于题目新增/编辑，不能只返回脱离系统的压缩包或文本。任务状态至少区分等待、执行、完成、中断、失败；进度必须在执行期间持续展示，取消必须真实终止或阻止后台任务继续执行。模型配置至少包含提供商 URL、模型名、密钥并实际生效；输入/输出 Token 应分别统计，费用公式、计价单位及估算限制需展示。工具调用、Agent Loop、检索和脚本生成均为可选设计。
 

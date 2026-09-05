@@ -31,3 +31,13 @@ class SubmissionRecord:
     error_info: str | None
     created_at: str
     finished_at: str | None
+
+
+@dataclass(frozen=True)
+class CaseResultRecord:
+    """表示一个已持久化测试点的公开判定指标。"""
+
+    case_index: int
+    result: str
+    time_seconds: float
+    memory_mb: float

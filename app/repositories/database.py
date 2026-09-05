@@ -129,6 +129,25 @@ MIGRATIONS = (
             "CREATE INDEX submissions_problem_idx ON submissions(problem_id)",
         ),
     ),
+    Migration(
+        version=5,
+        name="add_log_access_audits",
+        statements=(
+            """
+            CREATE TABLE log_access_audits (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                problem_id TEXT NOT NULL,
+                action TEXT NOT NULL CHECK (action = 'view_logs'),
+                accessed_at TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('200', '403')),
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX log_audits_user_idx ON log_access_audits(user_id)",
+            "CREATE INDEX log_audits_problem_idx ON log_access_audits(problem_id)",
+        ),
+    ),
 )
 
 

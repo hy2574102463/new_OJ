@@ -90,6 +90,14 @@ class StoredProblem(ProblemPayload):
     public_cases: bool = False
 
 
+class LogVisibilityUpdate(BaseModel):
+    """接收管理员设置的日志公开开关；缺省操作恢复为私有。"""
+
+    public_cases: bool = False
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 def problem_detail_data(problem: StoredProblem) -> dict[str, Any]:
     """生成 Step 1 详情响应，并隐藏内部 ``public_cases`` 字段。"""
 
