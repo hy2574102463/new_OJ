@@ -1,10 +1,10 @@
-"""定义 Step 2 提交请求和详情响应的稳定结构。"""
+"""定义 Step 2/3 提交请求、详情和列表摘要的稳定结构。"""
 
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.submissions import SubmissionRecord
+from app.models.submissions import SubmissionRecord, SubmissionStatus
 
 
 class SubmissionPayload(BaseModel):
@@ -61,3 +61,16 @@ def submission_detail_data(submission: SubmissionRecord) -> dict[str, object]:
         "run_info": run_info,
         "error_info": submission.error_info,
     }
+
+
+def submission_summary_data(submission: SubmissionRecord) -> dict[str, object]:
+    """生成列表摘要；未完成和错误任务不返回尚无意义的分数字段。"""
+
+    summary: dict[str, object] = {
+        "submission_id": str(submission.submission_id),
+        "status": submission.status.value,
+    }
+    if submission.status is SubmissionStatus.SUCCESS:
+        summary["score"] = submission.score
+        summary["counts"] = submission.counts
+    return summary

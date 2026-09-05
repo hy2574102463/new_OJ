@@ -4,26 +4,27 @@
 
 ## 当前实现状态
 
-截至 2026-09-05，基础设施、Step 4 用户认证、Step 1 题目管理和 Step 2 评测控制已经完成；Step 2 当前位于未提交工作区，评测列表/重判、日志和 Streamlit 页面尚未实现：
+截至 2026-09-05，基础设施、Step 4 用户认证、Step 1 题目管理、Step 2 评测控制和 Step 3 评测管理已经完成；Step 3 当前位于未提交工作区，评测日志和 Streamlit 页面尚未实现：
 
 | 阶段 | 状态 | 基线提交 | 已验证内容 |
 | --- | --- | --- | --- |
 | P0 基础设施 | 已完成 | `f3df18e` | 应用工厂、异步 SQLite、迁移、统一响应、健康检查、测试 reset |
 | Step 4 用户管理 | 已完成 | `896261e` | 注册、Session 登录/登出、bcrypt、角色权限、初始管理员 |
 | Step 1 题目管理 | 已完成 | `cce992e` | JSON CRUD、字段默认值、原子写入、启动校验、权限控制 |
-| Step 2 评测控制 | 已完成、待提交 | `cce992e` 后工作区 | Python/C++、语言注册、异步提交、AC/WA/RE/CE/TLE/MLE |
-| Step 3/5/6 | 未开始 | - | 评测管理、日志审计、Streamlit 前端 |
+| Step 2 评测控制 | 已完成 | `1cb223d` | Python/C++、语言注册、异步提交、AC/WA/RE/CE/TLE/MLE |
+| Step 3 评测管理 | 已完成、待提交 | `1cb223d` 后工作区 | 组合筛选、分页、详情权限和原 ID 重判 |
+| Step 5/6 | 未开始 | - | 日志审计、Streamlit 前端 |
 | Advance | 可选、未开始 | - | AI 配置、任务进度、取消和费用统计 |
 
-当前完整测试基线是 **67 passed, 2 warnings**。两条 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。新增覆盖包括语言模板校验、输出比较、Python/C++ 的 AC/WA/RE/CE/TLE/MLE、异步轮询、详情权限、限流、路径脱敏和评测目录清理。
+当前完整测试基线是 **78 passed, 2 warnings**。两条 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。Step 3 新增覆盖包括分页参数组合、用户/题目/状态筛选、列表字段裁剪、越权优先级、原 ID 重判、旧测试点清理和用户统计修正。
 
-下一步是 Step 3，增加提交列表筛选、分页和管理员重判。实现时继续保持提交任务状态 `pending/success/error` 与测试点结果 `AC/WA/TLE/MLE/RE/CE/UNK` 分离，并暂不通过 Step 3 详情公开 Step 5 才允许查询的测试点明细。
+下一步是 Step 5，提供测试点日志查询、题目日志可见性和访问审计。实现时复用已有 case_results，但不能通过列表或普通详情绕过 Step 5 权限读取测试点明细。
 
 ### 当前已知边界
 
 - 题目文件的并发锁仅在单个应用进程内生效；当前阶段不支持多个 Uvicorn worker 同时写同一道题。
 - `POST /api/reset/` 只允许测试环境使用，会清空测试数据并重建初始管理员，不能作为生产管理接口。
-- 当前仅实现 Step 2 的提交创建和详情轮询；提交列表、重判和测试点日志接口仍不可用。
+- 当前已实现提交创建、列表、详情和重判；测试点日志、公开策略和访问审计接口仍不可用。
 - 评测隔离是适合课程验收的进程工作目录、进程组清理和资源监控，不等同于容器或虚拟机安全边界；不要把服务直接暴露给不受信任的公网用户。
 - 默认管理员凭据只用于课程初始验收；部署到真实环境前必须增加安全的改密或初始化流程。
 
@@ -68,7 +69,7 @@ python3 -m venv .venv
 - `GET /api/users/`、`POST /api/users/admin`、`PUT /api/users/{user_id}/role`：管理员用户管理。
 - `app/api/` 只负责请求和响应编排，`app/services/` 放业务规则，`app/repositories/` 负责持久化。
 - `GET/POST /api/languages/`：查询或由登录用户注册安全的语言命令模板。
-- `POST /api/submissions/`、`GET /api/submissions/{submission_id}`：创建异步评测并由本人或管理员轮询汇总结果。
+- `POST/GET /api/submissions/`、`GET /api/submissions/{submission_id}`、`PUT /api/submissions/{submission_id}/rejudge`：提交、筛选分页、详情轮询和管理员重判。
 - FastAPI lifespan 在服务接收请求前执行迁移；`schema_migrations` 保证同一迁移只执行一次。
 - 数据库事务成功时提交，异常时回滚；路由等待 `aiosqlite` 时不会用同步磁盘调用阻塞事件循环。
 
@@ -112,6 +113,21 @@ curl -b cookies.txt http://127.0.0.1:8000/api/submissions/1
 ```
 
 第一次响应应包含 `pending`；随后详情变为 `success` 并显示 `score/counts`。一分钟内第四次提交返回 429，匿名访问返回 401，其他普通用户读取已有提交返回 403。
+
+### Step 3 评测管理
+
+提交列表必须提供 `user_id` 或 `problem_id` 至少一个一级条件，并可继续按 `pending/success/error` 筛选。`page/page_size` 都不提供时查全部；仅提供 `page_size` 时查第一页；仅提供 `page` 返回 400。普通用户只能查询自己的记录，管理员可跨用户查询。结果按 submission ID 排序，pending/error 摘要只含 ID 和状态，success 额外包含 `score/counts`。
+
+管理员重判使用原 submission ID、归属、语言和源码，并读取题目当前测试点与限制。切回 pending 的事务会删除旧 case results、清空汇总字段，并在必要时撤销该用户唯一的 AC 题目计数；后台评测完成后再按新结果恢复统计。重判不增加 `submit_count`，pending 记录重复重判返回 409，题目或语言已不存在时返回 404 且保留旧结果。
+
+可使用以下请求验证列表和重判：
+
+```bash
+curl -b cookies.txt 'http://127.0.0.1:8000/api/submissions/?problem_id=P1001&page_size=10'
+curl -b admin-cookies.txt -X PUT http://127.0.0.1:8000/api/submissions/1/rejudge
+```
+
+列表应返回 `total/submissions`；重判立即返回原 ID 和 pending，随后详情重新变为 success 或 error。
 
 ## 1. 交付目标与边界
 
@@ -169,7 +185,7 @@ tests/                    # API、权限、评测器和前端冒烟测试
 | P0 基础设施 | 已完成 | 环境、配置、目录、统一响应/异常、数据库迁移、日志脱敏、启动脚本 | 本地可启动，健康检查和 reset 可用 |
 | P1 Step 1 | 已完成 | 题目模型、JSON 仓库、CRUD API、字段默认值和冲突校验 | 登录后可完整维护题目，非法请求返回 400/409 |
 | P2 Step 2 | 已完成、待提交 | Python/C++ 运行器、输出比较、异步任务、语言注册、超时/内存监控 | 已通过自动化 AC/WA/RE/CE/TLE/MLE 与脱敏测试 |
-| P3 Step 3 | 未开始 | 提交持久化、列表筛选分页、详情权限、管理员 rejudge | pending→success/error 状态正确，重判覆盖原 submission |
+| P3 Step 3 | 已完成、待提交 | 列表筛选分页、详情权限、管理员 rejudge | 已验证原 ID pending→success/error、字段裁剪和统计一致性 |
 | P4 Step 4 | 已完成 | bcrypt 密码、Session 登录登出、角色依赖、禁用用户、用户接口 | 未登录 401、越权 403，初始 `admin/admintestpassword` 自动创建 |
 | P5 Step 5 | 未开始 | CaseResult 日志、题目 `public_cases`、访问审计接口 | 本人/管理员/公开场景可见性与审计状态正确 |
 | P6 Step 6 | 未开始 | Streamlit 三组页面、统一 API 客户端、会话和轮询 | 页面不绕过 API，能完成注册→建题→提交→看结果闭环 |

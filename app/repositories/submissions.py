@@ -93,6 +93,110 @@ class SubmissionRepository:
             row = await self._fetch_by_id(connection, submission_id)
         return self._to_submission(row) if row is not None else None
 
+    async def list_submissions(
+        self,
+        user_id: int | None,
+        problem_id: str | None,
+        status: SubmissionStatus | None,
+        page: int | None,
+        page_size: int | None,
+    ) -> tuple[int, list[SubmissionRecord]]:
+        """按组合条件筛选，返回分页前总数和按 ID 排序的当前页。"""
+
+        clauses: list[str] = []
+        parameters: list[object] = []
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            parameters.append(user_id)
+        if problem_id is not None:
+            clauses.append("problem_id = ?")
+            parameters.append(problem_id)
+        if status is not None:
+            clauses.append("status = ?")
+            parameters.append(status.value)
+
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        async with self.database.connection() as connection:
+            cursor = await connection.execute(
+                f"SELECT COUNT(*) AS count FROM submissions{where}", parameters
+            )
+            count_row = await cursor.fetchone()
+            total = int(count_row["count"]) if count_row is not None else 0
+
+            sql = f"SELECT * FROM submissions{where} ORDER BY submission_id"
+            list_parameters = list(parameters)
+            if page_size is not None:
+                resolved_page = page or 1
+                sql += " LIMIT ? OFFSET ?"
+                list_parameters.extend(
+                    (page_size, (resolved_page - 1) * page_size)
+                )
+            cursor = await connection.execute(sql, list_parameters)
+            rows = await cursor.fetchall()
+        return total, [self._to_submission(row) for row in rows]
+
+    async def reset_for_rejudge(self, submission_id: int) -> SubmissionRecord:
+        """清除旧结果并原子切回 pending，同时修正唯一 AC 的解题计数。"""
+
+        async with self.database.transaction() as connection:
+            row = await self._fetch_by_id(connection, submission_id)
+            if row is None:
+                raise LookupError("submission not found")
+            submission = self._to_submission(row)
+            if submission.status is SubmissionStatus.PENDING:
+                raise ValueError("submission is pending")
+
+            if (
+                submission.status is SubmissionStatus.SUCCESS
+                and submission.counts is not None
+                and submission.counts > 0
+                and submission.score == submission.counts
+            ):
+                cursor = await connection.execute(
+                    """
+                    SELECT COUNT(*) AS count FROM submissions
+                    WHERE user_id = ? AND problem_id = ?
+                      AND submission_id <> ? AND status = 'success'
+                      AND counts > 0 AND score = counts
+                    """,
+                    (
+                        submission.user_id,
+                        submission.problem_id,
+                        submission.submission_id,
+                    ),
+                )
+                other_accepts = await cursor.fetchone()
+                if other_accepts is not None and int(other_accepts["count"]) == 0:
+                    await connection.execute(
+                        """
+                        UPDATE users
+                        SET resolve_count = CASE
+                            WHEN resolve_count > 0 THEN resolve_count - 1 ELSE 0
+                        END
+                        WHERE user_id = ?
+                        """,
+                        (submission.user_id,),
+                    )
+
+            # 旧测试点属于上一次运行；pending 期间不能让 Step 5 读到过期明细。
+            await connection.execute(
+                "DELETE FROM case_results WHERE submission_id = ?", (submission_id,)
+            )
+            await connection.execute(
+                """
+                UPDATE submissions
+                SET status = 'pending', score = NULL, counts = NULL,
+                    compile_result = NULL, compile_message = NULL,
+                    run_result = NULL, run_message = NULL,
+                    error_info = NULL, finished_at = NULL
+                WHERE submission_id = ?
+                """,
+                (submission_id,),
+            )
+            updated = await self._fetch_by_id(connection, submission_id)
+            assert updated is not None
+            return self._to_submission(updated)
+
     async def finish_success(
         self, submission_id: int, result: JudgeResult, finished_at: datetime
     ) -> None:
