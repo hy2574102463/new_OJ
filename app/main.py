@@ -6,17 +6,24 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
+from app.api.languages import router as languages_router
 from app.api.problems import router as problems_router
+from app.api.submissions import router as submissions_router
 from app.api.system import router as system_router
 from app.api.users import router as users_router
 from app.core.config import Settings, get_settings
 from app.core.http import register_http_conventions
 from app.core.logging import configure_logging
+from app.judge.runner import JudgeRunner
 from app.repositories.database import Database
+from app.repositories.languages import LanguageRepository
 from app.repositories.problems import ProblemRepository
+from app.repositories.submissions import SubmissionRepository
 from app.repositories.users import UserRepository
 from app.services.auth import AuthService
+from app.services.languages import LanguageService
 from app.services.problems import ProblemService
+from app.services.submissions import SubmissionService
 from app.services.system import SystemService
 from app.services.users import UserService
 
@@ -33,9 +40,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     database = Database(resolved_settings.database_path)
     problem_repository = ProblemRepository(resolved_settings.problems_path)
     user_repository = UserRepository(database)
+    language_repository = LanguageRepository(database)
+    submission_repository = SubmissionRepository(database)
     auth_service = AuthService(resolved_settings, user_repository)
     user_service = UserService(auth_service, user_repository)
     problem_service = ProblemService(problem_repository)
+    language_service = LanguageService(language_repository)
+    submission_service = SubmissionService(
+        submission_repository,
+        problem_repository,
+        language_repository,
+        JudgeRunner(resolved_settings.judge_workspace_path),
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -43,9 +59,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         # await 是异步边界：迁移完成前服务不会开始接收业务请求。
         await database.initialize()
+        await language_service.ensure_defaults()
+        await submission_service.initialize()
         await problem_repository.initialize()
         await auth_service.ensure_initial_admin()
-        yield
+        try:
+            yield
+        finally:
+            await submission_service.shutdown()
 
     application = FastAPI(title="OJ API", version="0.1.0", lifespan=lifespan)
     # 共享对象只创建一次，再通过 app.state 提供给路由依赖。
@@ -53,15 +74,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.database = database
     application.state.problem_repository = problem_repository
     application.state.problem_service = problem_service
+    application.state.language_repository = language_repository
+    application.state.language_service = language_service
+    application.state.submission_repository = submission_repository
+    application.state.submission_service = submission_service
     application.state.auth_service = auth_service
     application.state.user_service = user_service
     application.state.system_service = SystemService(
-        resolved_settings, database, auth_service, problem_repository
+        resolved_settings,
+        database,
+        auth_service,
+        problem_repository,
+        language_service,
+        submission_service,
     )
     register_http_conventions(application)
     application.include_router(system_router)
     application.include_router(auth_router)
     application.include_router(users_router)
+    application.include_router(languages_router)
+    application.include_router(submissions_router)
     application.include_router(problems_router)
     return application
 

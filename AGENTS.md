@@ -2,6 +2,44 @@
 
 本文件是实现本仓库时的执行清单。需求依据见 [`oj/`](oj/) 文档，尤其是 `api.md`；若代码与指南冲突，应优先修正代码或记录明确的兼容决策。
 
+## 当前实现基线（2026-09-05）
+
+当前 Step 2 位于 `cce992e` 之后的未提交工作区；继续开发时应先保留并提交该工作区，不要重复实现已经完成的模块：
+
+| 阶段 | 状态 | 提交 | 现有能力 |
+| --- | --- | --- | --- |
+| P0 基础设施 | 已完成 | `f3df18e` | FastAPI 工厂、异步 SQLite、增量迁移、统一响应/异常、健康检查和测试 reset |
+| Step 4 | 已完成 | `896261e` | 用户注册、Session 登录/登出、bcrypt、角色管理、初始管理员和审计 |
+| Step 1 | 已完成 | `cce992e` | 题目 JSON CRUD、默认字段、校验、原子写入、启动校验和权限 |
+| Step 2 | 已完成、待提交 | 工作区 | 语言注册、Python/C++、输出比较、资源限制、异步提交轮询 |
+| Step 3/5/6 | 未开始 | - | 提交列表/重判、评测日志和 Streamlit 前端 |
+| Advance | 可选、未开始 | - | AI 配置与任务系统 |
+
+最近一次完整测试结果为 `67 passed, 2 warnings`。warning 是 FastAPI/Starlette `TestClient` 的上游弃用提示；新增测试覆盖语言配置、输出比较、Python/C++ 状态、资源限制、异步轮询、权限、限流和脱敏。
+
+### 已锁定的兼容决策
+
+- 所有后端路由保持 `async def`。路由只编排鉴权、参数和响应，业务规则放 `services/`，持久化放 `repositories/`，评测执行放 `judge/`；阻塞型 bcrypt、文件和子进程等待必须移出事件循环。
+- 所有响应保持 `{code,msg,data}`，FastAPI 参数校验统一映射为 400。错误检查优先级保持 `401 > 403 > 400 > 429 > 409 > 404 > 500`，避免通过错误差异泄露资源是否存在。
+- 数据库迁移 1 和 2 已经投入使用，不得改写；新增表或字段必须追加新迁移，以保证已有数据库可升级。
+- 用户和 Session 存 SQLite；题目继续使用 `OJ_PROBLEMS_PATH` 下每题一个 JSON 文件，不要在未记录迁移方案和兼容影响时改存 SQLite。
+- Session 默认有效 24 小时。Cookie 名默认 `oj_session`，使用 `HttpOnly`、`SameSite=Lax`，生产环境启用 `Secure`；数据库只保存随机令牌的 SHA-256 摘要。
+- 密码先经 SHA-256 预处理再使用 bcrypt，bcrypt 通过 `asyncio.to_thread` 执行。用户名去除首尾空白并用 `casefold` 做大小写无关唯一性和登录，同时保留展示大小写。
+- 管理员不能修改自己的角色，该冲突返回 409。用户被禁用时删除其全部 Session；已有禁用 Session 返回 401，禁用用户重新登录返回 403。用户列表按 ID 排序。
+- 初始管理员 `admin/admintestpassword` 在启动和 reset 时幂等创建。该固定凭据仅满足课程契约，不得把它扩展为生产安全方案。
+- 题目文件名使用题目 ID 的 SHA-256，写入流程是同目录临时文件、`fsync`、`os.replace`；文件调用通过 `asyncio.to_thread`，启动时损坏 JSON 必须使应用启动失败。
+- 题目必填文本必须存在且非空，`samples/testcases` 均至少一项；测试点 `input/output` 必须是字符串但允许空。可选字符串默认 `""`，标签默认 `[]`，题目 ID 区分大小写，列表按 ID 排序且只返回 `id/title`。
+- 缺省的 `time_limit/memory_limit` 在 JSON 内保持 `null`，供 Step 2 继承语言默认值；Step 1 详情暂时展示 `3.0` 秒和 `128` MB。内部 `public_cases` 默认 `false`，Step 1 响应不公开且普通编辑必须保留。
+- 题目操作均需登录，只有管理员可删除。当前文件锁是进程内锁，多 worker 并发写尚未支持；在解决跨进程一致性前，开发和验收只运行一个 Uvicorn worker。
+- `POST /api/reset/` 仅在 `OJ_ENVIRONMENT=test` 且 `OJ_TEST_RESET_ENABLED=true` 时存在；它会清空测试数据、删除 Session Cookie 并重建初始管理员，不能放宽到普通开发或生产环境。
+- `.env`、`data/`、`.venv/`、缓存、日志、用户代码和评测产物必须保持在 Git 忽略范围内；日志和普通响应不得包含密码、Session 原始令牌、模型密钥、用户源码、绝对路径或内部堆栈。
+
+### 后续接续点
+
+下一阶段是 Step 3。实现提交列表筛选、分页和管理员重判；复用现有 submissions/case_results 存储和后台评测服务，不要提前加入 Step 5 的日志公开策略。
+
+Step 3 的“先不看答案”练习：根据 `page/page_size` 规则独立写一个分页参数解析函数，并先预测两者全空、仅 page_size、仅 page、两者都有时的结果。
+
 ## 指南细节与实现约束
 
 - 推荐 Python 3.10、GCC 9+、C++14，并按 Linux 风格命令验证；Windows 开发优先使用 WSL。Step 2 只要求单用户提交任务正确，但评测仍须异步且不能阻塞事件循环。

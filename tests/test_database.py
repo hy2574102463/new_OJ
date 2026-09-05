@@ -55,7 +55,7 @@ async def test_existing_p0_database_upgrades_to_user_schema(tmp_path: Path) -> N
         )
         users_table = await cursor.fetchone()
 
-    assert versions == [1, 2]
+    assert versions == [1, 2, 3, 4]
     assert users_table is not None
 
 
@@ -101,8 +101,11 @@ async def test_reset_removes_application_tables_and_reapplies_migrations(
         names = [row["name"] for row in await cursor.fetchall()]
 
     assert names == [
+        "case_results",
+        "languages",
         "schema_migrations",
         "sessions",
+        "submissions",
         "user_role_audits",
         "users",
     ]

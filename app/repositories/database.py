@@ -67,6 +67,68 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=3,
+        name="add_languages",
+        statements=(
+            """
+            CREATE TABLE languages (
+                name TEXT PRIMARY KEY,
+                name_key TEXT NOT NULL UNIQUE,
+                file_ext TEXT NOT NULL,
+                compile_cmd TEXT,
+                run_cmd TEXT NOT NULL,
+                time_limit REAL NOT NULL CHECK (time_limit > 0),
+                memory_limit INTEGER NOT NULL CHECK (memory_limit > 0),
+                created_by INTEGER,
+                FOREIGN KEY (created_by) REFERENCES users(user_id)
+            )
+            """,
+        ),
+    ),
+    Migration(
+        version=4,
+        name="add_submissions_and_case_results",
+        statements=(
+            """
+            CREATE TABLE submissions (
+                submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                problem_id TEXT NOT NULL,
+                language_name TEXT NOT NULL,
+                code TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('pending', 'success', 'error')),
+                score INTEGER,
+                counts INTEGER,
+                compile_result TEXT,
+                compile_message TEXT,
+                run_result TEXT,
+                run_message TEXT,
+                error_info TEXT,
+                created_at TEXT NOT NULL,
+                finished_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                FOREIGN KEY (language_name) REFERENCES languages(name)
+            )
+            """,
+            """
+            CREATE TABLE case_results (
+                submission_id INTEGER NOT NULL,
+                case_index INTEGER NOT NULL,
+                result TEXT NOT NULL CHECK (
+                    result IN ('AC', 'WA', 'TLE', 'MLE', 'RE', 'CE', 'UNK')
+                ),
+                time_seconds REAL NOT NULL,
+                memory_mb REAL NOT NULL,
+                PRIMARY KEY (submission_id, case_index),
+                FOREIGN KEY (submission_id)
+                    REFERENCES submissions(submission_id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX submissions_user_created_idx ON submissions(user_id, created_at)",
+            "CREATE INDEX submissions_problem_idx ON submissions(problem_id)",
+        ),
+    ),
 )
 
 

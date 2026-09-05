@@ -17,6 +17,7 @@ def test_settings(tmp_path: Path) -> Settings:
         environment="test",
         database_path=tmp_path / "oj-test.db",
         problems_path=tmp_path / "problems",
+        judge_workspace_path=tmp_path / "judge",
         log_level="WARNING",
         test_reset_enabled=True,
     )

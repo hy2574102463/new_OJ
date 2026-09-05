@@ -2,9 +2,30 @@
 
 本仓库用于实现课程 OJ 大作业。规划依据 [`oj/index.md`](oj/index.md)、[`oj/api.md`](oj/api.md)、各 Step 实验说明及 [`oj/requirements.md`](oj/requirements.md) 制定。目标是在验收前交付一个可运行、可演示、接口行为一致的小型 Online Judge，并预留 AI 智能命题扩展。
 
-## 当前实现：P0 基础设施
+## 当前实现状态
 
-当前代码已经提供 FastAPI 应用工厂、异步 SQLite 连接与迁移、统一响应和异常处理、请求日志、健康检查、测试专用 reset、Step 4 用户与 Session，以及 Step 1 题目 JSON 管理。提交、评测器和 Streamlit 页面将在后续 Step 中实现。
+截至 2026-09-05，基础设施、Step 4 用户认证、Step 1 题目管理和 Step 2 评测控制已经完成；Step 2 当前位于未提交工作区，评测列表/重判、日志和 Streamlit 页面尚未实现：
+
+| 阶段 | 状态 | 基线提交 | 已验证内容 |
+| --- | --- | --- | --- |
+| P0 基础设施 | 已完成 | `f3df18e` | 应用工厂、异步 SQLite、迁移、统一响应、健康检查、测试 reset |
+| Step 4 用户管理 | 已完成 | `896261e` | 注册、Session 登录/登出、bcrypt、角色权限、初始管理员 |
+| Step 1 题目管理 | 已完成 | `cce992e` | JSON CRUD、字段默认值、原子写入、启动校验、权限控制 |
+| Step 2 评测控制 | 已完成、待提交 | `cce992e` 后工作区 | Python/C++、语言注册、异步提交、AC/WA/RE/CE/TLE/MLE |
+| Step 3/5/6 | 未开始 | - | 评测管理、日志审计、Streamlit 前端 |
+| Advance | 可选、未开始 | - | AI 配置、任务进度、取消和费用统计 |
+
+当前完整测试基线是 **67 passed, 2 warnings**。两条 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。新增覆盖包括语言模板校验、输出比较、Python/C++ 的 AC/WA/RE/CE/TLE/MLE、异步轮询、详情权限、限流、路径脱敏和评测目录清理。
+
+下一步是 Step 3，增加提交列表筛选、分页和管理员重判。实现时继续保持提交任务状态 `pending/success/error` 与测试点结果 `AC/WA/TLE/MLE/RE/CE/UNK` 分离，并暂不通过 Step 3 详情公开 Step 5 才允许查询的测试点明细。
+
+### 当前已知边界
+
+- 题目文件的并发锁仅在单个应用进程内生效；当前阶段不支持多个 Uvicorn worker 同时写同一道题。
+- `POST /api/reset/` 只允许测试环境使用，会清空测试数据并重建初始管理员，不能作为生产管理接口。
+- 当前仅实现 Step 2 的提交创建和详情轮询；提交列表、重判和测试点日志接口仍不可用。
+- 评测隔离是适合课程验收的进程工作目录、进程组清理和资源监控，不等同于容器或虚拟机安全边界；不要把服务直接暴露给不受信任的公网用户。
+- 默认管理员凭据只用于课程初始验收；部署到真实环境前必须增加安全的改密或初始化流程。
 
 ### 创建环境并运行
 
@@ -30,6 +51,7 @@ python3 -m venv .venv
 | `OJ_ENVIRONMENT` | `development` | 运行环境：`development`、`test` 或 `production` |
 | `OJ_DATABASE_PATH` | `data/oj.db` | SQLite 数据库文件路径 |
 | `OJ_PROBLEMS_PATH` | `data/problems` | 每题一个 JSON 的题目配置目录 |
+| `OJ_JUDGE_WORKSPACE_PATH` | `.judge-tmp` | 用户源码、可执行文件所在的临时隔离目录 |
 | `OJ_LOG_LEVEL` | `INFO` | Python 日志级别 |
 | `OJ_TEST_RESET_ENABLED` | `false` | 是否启用测试 reset；还必须同时处于 `test` 环境 |
 | `OJ_SESSION_COOKIE_NAME` | `oj_session` | 浏览器保存 Session 令牌的 Cookie 名 |
@@ -37,7 +59,7 @@ python3 -m venv .venv
 
 运行时数据库、`.env`、虚拟环境、日志和评测临时文件均已加入 `.gitignore`。不要把密码、Session、模型密钥或用户代码写入环境模板和日志。
 
-### P0 接口与分层
+### 已实现接口与分层
 
 - `GET /health`：检查应用与 SQLite 是否可用。
 - `POST /api/reset/`：仅当 `OJ_ENVIRONMENT=test` 且 `OJ_TEST_RESET_ENABLED=true` 时可用；其他环境返回 404。重置会清理 Session Cookie 并重建初始管理员；正式管理员鉴权将在该测试接口需要开放到非测试环境时补充。
@@ -45,6 +67,8 @@ python3 -m venv .venv
 - `GET /api/users/{user_id}`：本人或管理员查询用户资料。
 - `GET /api/users/`、`POST /api/users/admin`、`PUT /api/users/{user_id}/role`：管理员用户管理。
 - `app/api/` 只负责请求和响应编排，`app/services/` 放业务规则，`app/repositories/` 负责持久化。
+- `GET/POST /api/languages/`：查询或由登录用户注册安全的语言命令模板。
+- `POST /api/submissions/`、`GET /api/submissions/{submission_id}`：创建异步评测并由本人或管理员轮询汇总结果。
 - FastAPI lifespan 在服务接收请求前执行迁移；`schema_migrations` 保证同一迁移只执行一次。
 - 数据库事务成功时提交，异常时回滚；路由等待 `aiosqlite` 时不会用同步磁盘调用阻塞事件循环。
 
@@ -69,6 +93,25 @@ JSON 内未设置 `time_limit/memory_limit` 时保留 `null`，供 Step 2 继承
 磁盘文件名是题目 ID 的 SHA-256 摘要，用户输入不能构造目录路径。写入先完成同目录临时文件，再使用原子替换发布；文件操作通过工作线程执行，避免阻塞 FastAPI 事件循环。应用启动会校验全部 JSON，损坏配置会阻止启动，而不会静默漏掉题目。
 
 手动验收可在 `/docs` 依次执行：登录 → 新增题目 → 查看列表 → 查看详情 → 编辑 → 管理员删除。预期重复 ID 返回 409、路径 ID 与正文 ID 不一致返回 400、不存在返回 404、普通用户删除返回 403、匿名请求返回 401。
+
+### Step 2 评测控制
+
+SQLite 迁移 3 保存语言配置，迁移 4 保存 submissions 和内部 case results；启动及测试 reset 会幂等恢复 Python/C++ 默认语言。语言命令先使用 `shlex` 拆成参数数组，再通过 `asyncio.create_subprocess_exec` 执行，不经过 shell。Python 默认运行命令为 `python3 {src}`，C++ 使用 C++14 编译后执行 `{exe}`。
+
+提交路由写入 `pending` 后用 `asyncio.create_task` 启动后台评测，因此 HTTP 请求无需等待用户程序。服务持有任务强引用；应用关闭或测试 reset 时取消任务，运行器随后杀死整个进程组并清理临时目录。墙钟时间由异步循环限制，进程树 RSS 由 `psutil` 监控，Linux `prlimit` 另设 CPU、地址空间、文件大小和文件描述符硬上限；每点 10 分。WA、RE、CE、TLE、MLE 都是正常完成的判题结论，因此 submission 为 `success`；只有评测基础设施失败才为 `error`。
+
+输出比较仅忽略每行末尾空白和整个输出末尾的多余换行，行首空格、内部空行和额外提示语仍参与比较。题目没有填写限制时继承语言默认值。Step 2 详情只返回总分、编译信息、运行摘要和任务错误，不返回源码或测试点明细。
+
+可在登录并创建题目后提交并轮询：
+
+```bash
+curl -b cookies.txt -H 'Content-Type: application/json' \
+  -d '{"problem_id":"P1001","language":"python","code":"a,b=map(int,input().split());print(a+b)"}' \
+  http://127.0.0.1:8000/api/submissions/
+curl -b cookies.txt http://127.0.0.1:8000/api/submissions/1
+```
+
+第一次响应应包含 `pending`；随后详情变为 `success` 并显示 `score/counts`。一分钟内第四次提交返回 429，匿名访问返回 401，其他普通用户读取已有提交返回 403。
 
 ## 1. 交付目标与边界
 
@@ -121,17 +164,17 @@ tests/                    # API、权限、评测器和前端冒烟测试
 
 ## 3. 分阶段开发路线
 
-| 阶段 | 主要工作 | 完成判据 |
-| --- | --- | --- |
-| P0 基础设施 | 环境、配置、目录、统一响应/异常、数据库迁移、日志脱敏、启动脚本 | 本地可启动，健康检查和 reset 可用 |
-| P1 Step 1 | 题目模型、JSON 仓库、CRUD API、字段默认值和冲突校验 | 登录后可完整维护题目，非法请求返回 400/409 |
-| P2 Step 2 | Python 运行器→输出比较→异步任务；C++ 编译运行；语言注册；超时/内存监控 | 可复现 AC/WA/RE/CE/TLE/MLE，结果不泄露服务器路径 |
-| P3 Step 3 | 提交持久化、列表筛选分页、详情权限、管理员 rejudge | pending→success/error 状态正确，重判覆盖原 submission |
-| P4 Step 4 | bcrypt 密码、Session 登录登出、角色依赖、禁用用户、用户接口 | 未登录 401、越权 403，初始 `admin/admintestpassword` 自动创建 |
-| P5 Step 5 | CaseResult 日志、题目 `public_cases`、访问审计接口 | 本人/管理员/公开场景可见性与审计状态正确 |
-| P6 Step 6 | Streamlit 三组页面、统一 API 客户端、会话和轮询 | 页面不绕过 API，能完成注册→建题→提交→看结果闭环 |
-| P7 Advance（可选） | AI 配置、后台任务、进度/SSE 或轮询、取消、用量计费、结果导入题目表单 | 任务可观察、可中断，密钥不回显，费用依据可解释 |
-| P8 验收 | 集成测试、边界/安全测试、演示数据、报告和提交检查 | 覆盖评分点，Conventional Commits，9 月 10 日前提交 commit 与报告 |
+| 阶段 | 状态 | 主要工作 | 完成判据 |
+| --- | --- | --- | --- |
+| P0 基础设施 | 已完成 | 环境、配置、目录、统一响应/异常、数据库迁移、日志脱敏、启动脚本 | 本地可启动，健康检查和 reset 可用 |
+| P1 Step 1 | 已完成 | 题目模型、JSON 仓库、CRUD API、字段默认值和冲突校验 | 登录后可完整维护题目，非法请求返回 400/409 |
+| P2 Step 2 | 已完成、待提交 | Python/C++ 运行器、输出比较、异步任务、语言注册、超时/内存监控 | 已通过自动化 AC/WA/RE/CE/TLE/MLE 与脱敏测试 |
+| P3 Step 3 | 未开始 | 提交持久化、列表筛选分页、详情权限、管理员 rejudge | pending→success/error 状态正确，重判覆盖原 submission |
+| P4 Step 4 | 已完成 | bcrypt 密码、Session 登录登出、角色依赖、禁用用户、用户接口 | 未登录 401、越权 403，初始 `admin/admintestpassword` 自动创建 |
+| P5 Step 5 | 未开始 | CaseResult 日志、题目 `public_cases`、访问审计接口 | 本人/管理员/公开场景可见性与审计状态正确 |
+| P6 Step 6 | 未开始 | Streamlit 三组页面、统一 API 客户端、会话和轮询 | 页面不绕过 API，能完成注册→建题→提交→看结果闭环 |
+| P7 Advance（可选） | 未开始 | AI 配置、后台任务、进度/SSE 或轮询、取消、用量计费、结果导入题目表单 | 任务可观察、可中断，密钥不回显，费用依据可解释 |
+| P8 验收 | 未开始 | 集成测试、边界/安全测试、演示数据、报告和提交检查 | 覆盖评分点，Conventional Commits，9 月 10 日前提交 commit 与报告 |
 
 开发顺序应保持依赖关系：先后端契约和权限，再评测器，最后前端；每阶段完成后打可回滚的 Conventional Commit（如 `feat(judge): add timeout monitor`）。
 

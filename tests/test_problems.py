@@ -206,6 +206,9 @@ def test_reset_removes_problems_and_recreates_admin(client: TestClient) -> None:
     login_admin(client)
     client.post("/api/problems/", json=valid_problem())
     assert client.post("/api/reset/").status_code == 200
+    assert client.get("/api/languages/").json()["data"] == {
+        "name": ["cpp", "python"]
+    }
     login_admin(client)
     assert client.get("/api/problems/").json()["data"] == []
 

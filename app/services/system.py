@@ -5,6 +5,8 @@ from app.core.exceptions import AppError
 from app.repositories.database import Database
 from app.repositories.problems import ProblemRepository
 from app.services.auth import AuthService
+from app.services.languages import LanguageService
+from app.services.submissions import SubmissionService
 
 
 class SystemService:
@@ -16,6 +18,8 @@ class SystemService:
         database: Database,
         auth: AuthService,
         problems: ProblemRepository,
+        languages: LanguageService,
+        submissions: SubmissionService,
     ) -> None:
         """注入配置、数据库、认证服务和题库，统一执行测试重置。"""
 
@@ -23,6 +27,8 @@ class SystemService:
         self.database = database
         self.auth = auth
         self.problems = problems
+        self.languages = languages
+        self.submissions = submissions
 
     async def health(self) -> dict[str, str]:
         """确认数据库可查询，并返回供健康接口展示的稳定数据。"""
@@ -36,7 +42,10 @@ class SystemService:
         # 两个条件同时成立才能执行破坏性操作，防止配置失误清空真实数据。
         if self.settings.environment != "test" or not self.settings.test_reset_enabled:
             raise AppError(status_code=404, message="not found")
+        # 先取消活跃评测，防止旧任务在数据库重建后写回已清除的数据。
+        await self.submissions.shutdown()
         await self.problems.reset()
         await self.database.reset()
         # reset 删除全部业务表数据，因此必须恢复课程指定的初始管理员。
         await self.auth.ensure_initial_admin()
+        await self.languages.ensure_defaults()
