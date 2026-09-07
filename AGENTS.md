@@ -17,7 +17,7 @@
 | Step 6 | 已完成、待提交 | 工作区 | Streamlit API 客户端、账户/题目/提交和管理员页面 |
 | Advance | 可选、未开始 | - | AI 配置与任务系统 |
 
-最近一次完整测试结果为 `106 passed, 2 warnings`。Step 6 新增客户端、状态、payload 和 Streamlit 冒烟测试；warning 是 FastAPI/Starlette `TestClient` 的上游弃用提示。
+最近一次完整测试结果为 `107 passed, 2 warnings`。Step 6 新增客户端、状态、payload 和 Streamlit 冒烟测试；warning 是 FastAPI/Starlette `TestClient` 的上游弃用提示。
 
 ### 已锁定的兼容决策
 

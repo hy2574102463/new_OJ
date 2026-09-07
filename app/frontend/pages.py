@@ -7,11 +7,21 @@ import streamlit as st
 
 try:
     from .client import ApiClient, ApiError
-    from .forms import build_problem_payload, should_poll, submission_query
+    from .forms import (
+        build_language_payload,
+        build_problem_payload,
+        should_poll,
+        submission_query,
+    )
     from .state import AUTH_KEY, get_api_client, login, logout
 except ImportError:  # Streamlit 直接执行 app/frontend/app.py 时使用同目录模块。
     from client import ApiClient, ApiError
-    from forms import build_problem_payload, should_poll, submission_query
+    from forms import (
+        build_language_payload,
+        build_problem_payload,
+        should_poll,
+        submission_query,
+    )
     from state import AUTH_KEY, get_api_client, login, logout
 
 
@@ -333,7 +343,9 @@ def submissions_page() -> None:
         return
     problem_ids = [item["id"] for item in problems] if isinstance(problems, list) else []
     language_names = languages.get("name", []) if isinstance(languages, dict) else []
-    submit_tab, records_tab, detail_tab = st.tabs(["提交代码", "提交记录", "结果详情"])
+    submit_tab, records_tab, detail_tab, language_tab = st.tabs(
+        ["提交代码", "提交记录", "结果详情", "语言管理"]
+    )
     with submit_tab:
         if not problem_ids or not language_names:
             st.info("提交前需要至少一道题目和一种可用语言。")
@@ -357,6 +369,84 @@ def submissions_page() -> None:
                     st.success(f"提交 {result['submission_id']} 已进入队列。")
                 except ApiError as error:
                     _show_error(error)
+    with language_tab:
+        registered_name = st.session_state.pop("language_registered_name", None)
+        if registered_name:
+            st.success(f"语言 {registered_name} 已注册，并已加入提交语言列表。")
+
+        st.subheader("支持语言列表")
+        if language_names:
+            # GET 接口有意只公开名称；运行命令属于评测器内部配置，不在前端回显。
+            st.dataframe(
+                [{"语言名称": name} for name in language_names],
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info("当前没有可用语言。")
+
+        st.subheader("注册新语言")
+        language_kind = st.segmented_control(
+            "语言类型",
+            options=["解释型", "编译型"],
+            default="解释型",
+            selection_mode="single",
+            key="language_kind",
+        )
+        compiled = language_kind == "编译型"
+        with st.form("register_language_form", clear_on_submit=True):
+            identity_left, identity_right = st.columns(2)
+            language_name = identity_left.text_input(
+                "语言名称", placeholder="例如 ruby 或 go"
+            )
+            file_extension = identity_right.text_input(
+                "源码扩展名", placeholder="例如 .rb 或 .go"
+            )
+            compile_command = ""
+            if compiled:
+                compile_command = st.text_input(
+                    "编译命令",
+                    value="g++ {src} -o {exe}",
+                    key="compiled_language_compile_cmd",
+                )
+                run_command = st.text_input(
+                    "运行命令", value="{exe}", key="compiled_language_run_cmd"
+                )
+            else:
+                run_command = st.text_input(
+                    "运行命令",
+                    value="python3 {src}",
+                    key="interpreted_language_run_cmd",
+                )
+            limit_left, limit_right = st.columns(2)
+            time_limit = limit_left.number_input(
+                "默认时间限制（秒）", min_value=0.01, value=1.0
+            )
+            memory_limit = limit_right.number_input(
+                "默认内存限制（MB）", min_value=1, value=128
+            )
+            register_language = st.form_submit_button(
+                "注册语言", icon=":material/add:", type="primary"
+            )
+        if register_language:
+            payload = build_language_payload(
+                {
+                    "name": language_name,
+                    "file_ext": file_extension,
+                    "compile_cmd": compile_command,
+                    "run_cmd": run_command,
+                    "time_limit": time_limit,
+                    "memory_limit": memory_limit,
+                },
+                compiled=compiled,
+            )
+            try:
+                result = _client().post("/api/languages/", json=payload)
+                # 完整重跑会重新执行顶部 GET，并让新语言立即进入提交下拉框。
+                st.session_state["language_registered_name"] = result["name"]
+                st.rerun()
+            except ApiError as error:
+                _show_error(error)
     with records_tab:
         with st.form("submission_filter"):
             left, middle, right = st.columns(3)

@@ -17,7 +17,7 @@
 | Step 6 | 已完成、待提交 | 当前工作区 | Streamlit API 客户端、账户/题目/提交与管理员页面 |
 | Advance | 可选、未开始 | - | AI 配置、任务进度、取消和费用统计 |
 
-当前完整测试基线是 **106 passed, 2 warnings**。Step 6 新增客户端、会话状态、表单转换和 Streamlit `AppTest` 覆盖；两条既有 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。
+当前完整测试基线是 **107 passed, 2 warnings**。Step 6 新增客户端、会话状态、表单转换和 Streamlit `AppTest` 覆盖；两条既有 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。
 
 下一步是验收准备，或按需进入可选 Advance。前端只保存 Session Cookie 并调用现有 HTTP 接口，不直接读取 SQLite 或题目 JSON。
 
@@ -143,7 +143,9 @@ SQLite 迁移 5 保存 `view_logs` 访问审计；测试点结果继续复用迁
 
 ### Step 6 Streamlit 前端
 
-入口 `app/frontend/app.py` 使用 `st.navigation` 提供中文原生多页面。账户页始终可见；登录后显示题目和提交页；管理员额外看到用户管理和访问审计。题目页覆盖列表、详情、完整新增/编辑、删除及日志公开设置；提交页覆盖源码提交、筛选分页、详情、逐测试点日志和管理员重判。
+入口 `app/frontend/app.py` 使用 `st.navigation` 提供中文原生多页面。账户页始终可见；登录后显示题目和提交页；管理员额外看到用户管理和访问审计。题目页覆盖列表、详情、完整新增/编辑、删除及日志公开设置；提交页覆盖源码提交、筛选分页、详情、逐测试点日志、管理员重判和语言注册。
+
+“提交 → 语言管理”通过 `GET /api/languages/` 展示当前支持语言列表，并允许任意已登录用户调用 `POST /api/languages/`。解释型语言只需包含 `{src}` 的运行命令，例如 `python3 {src}`；编译型语言的编译命令必须包含 `{src}` 和 `{exe}`，运行命令必须包含 `{exe}`，例如 `g++ {src} -o {exe}` 与 `{exe}`。页面只整理字段，最终命令安全和名称唯一性仍由后端校验；注册成功后页面会重新读取语言列表，新语言立即出现在列表和提交下拉框。
 
 每个 Streamlit 浏览器会话在 `st.session_state` 中持有一个独立的 `requests.Session`。登录响应设置的 HttpOnly Cookie 由该 Session 在内存中保存并自动带给后续 FastAPI 请求，不写磁盘。401 会清 Cookie、公开用户资料和私有页面选择；主动登出即使遇到断网也清理前端状态，同时提示后端 Session 可能等待自然过期。客户端使用 3 秒连接、15 秒读取超时，并验证 HTTP 状态与 `{code,msg,data}` 信封一致。
 

@@ -54,6 +54,26 @@ def build_problem_payload(
     }
 
 
+def build_language_payload(
+    values: Mapping[str, Any], *, compiled: bool
+) -> dict[str, Any]:
+    """构造语言注册请求；解释型语言用 ``None`` 明确表示无需编译。
+
+    本函数只整理表单类型和首尾空白。命令占位符、可执行路径及名称唯一性
+    仍由 FastAPI 校验，因为客户端输入不能被当作安全边界。
+    """
+
+    compile_command = str(values.get("compile_cmd", "")).strip()
+    return {
+        "name": str(values.get("name", "")).strip(),
+        "file_ext": str(values.get("file_ext", "")).strip(),
+        "compile_cmd": compile_command if compiled else None,
+        "run_cmd": str(values.get("run_cmd", "")).strip(),
+        "time_limit": float(values["time_limit"]),
+        "memory_limit": int(values["memory_limit"]),
+    }
+
+
 def submission_query(
     *,
     user_id: str,

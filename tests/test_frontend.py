@@ -7,7 +7,13 @@ import pytest
 import requests
 
 from app.frontend.client import ApiClient, ApiError
-from app.frontend.forms import build_problem_payload, clean_cases, should_poll, submission_query
+from app.frontend.forms import (
+    build_language_payload,
+    build_problem_payload,
+    clean_cases,
+    should_poll,
+    submission_query,
+)
 from app.frontend.state import AUTH_KEY, CLIENT_KEY, clear_login_state, login, logout
 
 
@@ -185,6 +191,34 @@ def test_problem_payload_keeps_empty_case_and_encodes_inherited_limits() -> None
     assert payload["memory_limit"] == 256
     assert payload["tags"] == ["math", "basic", "math"]
     assert clean_cases([{"input": 1, "output": "x"}]) == []
+
+
+def test_language_payload_distinguishes_interpreted_and_compiled_modes() -> None:
+    """两种语言模式共用资源字段，但只有编译型语言发送编译命令。"""
+
+    values = {
+        "name": " Go ",
+        "file_ext": " .go ",
+        "compile_cmd": " go build -o {exe} {src} ",
+        "run_cmd": " {exe} ",
+        "time_limit": 2,
+        "memory_limit": 256,
+    }
+    compiled = build_language_payload(values, compiled=True)
+    assert compiled == {
+        "name": "Go",
+        "file_ext": ".go",
+        "compile_cmd": "go build -o {exe} {src}",
+        "run_cmd": "{exe}",
+        "time_limit": 2.0,
+        "memory_limit": 256,
+    }
+
+    interpreted = build_language_payload(
+        {**values, "run_cmd": " go run {src} "}, compiled=False
+    )
+    assert interpreted["compile_cmd"] is None
+    assert interpreted["run_cmd"] == "go run {src}"
 
 
 def test_submission_query_pairs_pagination_and_polling_stops_at_terminal_state() -> None:
