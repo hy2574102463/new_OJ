@@ -19,6 +19,9 @@ PAGE_STATE_KEYS = (
     "active_submission_id",
     "active_submission_pending",
     "selected_submission_id",
+    "active_ai_task_id",
+    "active_ai_task_running",
+    "ai_problem_draft",
 )
 
 

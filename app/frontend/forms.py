@@ -4,6 +4,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
+def normalize_case_text(value: str) -> str:
+    """兼容模型双重转义的 ``\\n``，统一成表格可显示的真实换行。"""
+
+    return value.replace("\\n", "\n")
+
+
 def clean_cases(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     """保留具有字符串输入输出的行，并丢弃数据编辑器产生的全空占位行。"""
 
@@ -15,7 +21,12 @@ def clean_cases(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
             continue
         if input_value == "" and output_value == "" and bool(row.get("_placeholder")):
             continue
-        cases.append({"input": input_value, "output": output_value})
+        cases.append(
+            {
+                "input": normalize_case_text(input_value),
+                "output": normalize_case_text(output_value),
+            }
+        )
     return cases
 
 

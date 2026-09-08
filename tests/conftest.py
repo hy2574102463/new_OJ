@@ -20,6 +20,10 @@ def test_settings(tmp_path: Path) -> Settings:
         judge_workspace_path=tmp_path / "judge",
         log_level="WARNING",
         test_reset_enabled=True,
+        # 测试不能继承开发者 .env 中的真实模型地址或密钥。
+        ai_provider_url="",
+        ai_model="",
+        ai_api_key="",
     )
 
 

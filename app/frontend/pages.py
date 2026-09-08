@@ -10,6 +10,7 @@ try:
     from .forms import (
         build_language_payload,
         build_problem_payload,
+        normalize_case_text,
         should_poll,
         submission_query,
     )
@@ -19,6 +20,7 @@ except ImportError:  # Streamlit 直接执行 app/frontend/app.py 时使用同�
     from forms import (
         build_language_payload,
         build_problem_payload,
+        normalize_case_text,
         should_poll,
         submission_query,
     )
@@ -35,6 +37,33 @@ def _show_error(error: ApiError) -> None:
     """统一展示客户端已经脱敏的错误提示。"""
 
     st.error(error.message)
+
+
+def _render_cases(cases: Any, *, heading: str = "样例") -> None:
+    """逐条展示输入输出，使真实换行不受表格固定行高限制。
+
+    ``cases`` 来自后端题目详情或 AI 结果。展示层只读取映射中的字符串，
+    不修改原始对象；异常行会被忽略，避免不完整响应导致整个页面崩溃。
+    """
+
+    rows = (
+        [row for row in cases if isinstance(row, Mapping)]
+        if isinstance(cases, list)
+        else []
+    )
+    st.markdown(f"**{heading}**")
+    if not rows:
+        st.info(f"暂无{heading}。")
+        return
+    for index, row in enumerate(rows, start=1):
+        st.caption(f"{heading} {index}")
+        input_column, output_column = st.columns(2)
+        input_text = normalize_case_text(str(row.get("input", "")))
+        output_text = normalize_case_text(str(row.get("output", "")))
+        input_column.markdown("输入")
+        input_column.code(input_text or "（空）", language=None)
+        output_column.markdown("输出")
+        output_column.code(output_text or "（空）", language=None)
 
 
 def _require_user() -> dict[str, Any] | None:
@@ -107,8 +136,18 @@ def _problem_editor(
     """渲染完整题目表单，并在提交时创建或替换题目。"""
 
     data = dict(initial or {})
-    samples = data.get("samples") or [{"input": "", "output": ""}]
-    testcases = data.get("testcases") or [{"input": "", "output": ""}]
+    samples = [
+        {**row, "input": normalize_case_text(str(row.get("input", ""))),
+         "output": normalize_case_text(str(row.get("output", "")))}
+        for row in (data.get("samples") or [{"input": "", "output": ""}])
+    ]
+    testcases = [
+        {**row, "input": normalize_case_text(str(row.get("input", ""))),
+         "output": normalize_case_text(str(row.get("output", "")))}
+        for row in (data.get("testcases") or [{"input": "", "output": ""}])
+    ]
+    stored_time_limit = data.get("time_limit")
+    stored_memory_limit = data.get("memory_limit")
     with st.form(f"{prefix}_problem_form"):
         first, second = st.columns([1, 2])
         problem_id = first.text_input("题目 ID", value=str(data.get("id", "")), disabled=editing)
@@ -126,7 +165,8 @@ def _problem_editor(
             samples,
             num_rows="dynamic",
             use_container_width=True,
-            key=f"{prefix}_samples",
+            # 后缀用于丢弃旧版本把换行编码成字面量 ``\\n`` 的 widget 状态。
+            key=f"{prefix}_samples_multiline_v2",
             column_config={"input": "输入", "output": "输出"},
         )
         st.subheader("测试点")
@@ -134,7 +174,7 @@ def _problem_editor(
             testcases,
             num_rows="dynamic",
             use_container_width=True,
-            key=f"{prefix}_testcases",
+            key=f"{prefix}_testcases_multiline_v2",
             column_config={"input": "输入", "output": "预期输出"},
         )
         optional_left, optional_right = st.columns(2)
@@ -144,13 +184,25 @@ def _problem_editor(
         difficulty = optional_right.text_input("难度", value=str(data.get("difficulty", "")))
         tags = st.text_input("标签（英文逗号分隔）", value=",".join(data.get("tags") or []))
         limit_left, limit_right = st.columns(2)
-        inherit_time = limit_left.checkbox("时间限制继承语言默认值", value=not editing)
-        time_limit = limit_left.number_input(
-            "时间限制（秒）", min_value=0.01, value=float(data.get("time_limit", 3.0)), disabled=inherit_time
+        inherit_time = limit_left.checkbox(
+            "时间限制继承语言默认值",
+            value=not editing or stored_time_limit is None,
         )
-        inherit_memory = limit_right.checkbox("内存限制继承语言默认值", value=not editing)
+        time_limit = limit_left.number_input(
+            "时间限制（秒）",
+            min_value=0.01,
+            value=float(stored_time_limit if stored_time_limit is not None else 3.0),
+            disabled=inherit_time,
+        )
+        inherit_memory = limit_right.checkbox(
+            "内存限制继承语言默认值",
+            value=not editing or stored_memory_limit is None,
+        )
         memory_limit = limit_right.number_input(
-            "内存限制（MB）", min_value=1, value=int(data.get("memory_limit", 128)), disabled=inherit_memory
+            "内存限制（MB）",
+            min_value=1,
+            value=int(stored_memory_limit if stored_memory_limit is not None else 128),
+            disabled=inherit_memory,
         )
         if editing:
             st.caption("详情接口不公开限制是否继承；本次保存请明确选择继承或固定值。")
@@ -225,7 +277,7 @@ def problems_page() -> None:
                 info_left.markdown(f"**输入说明**\n\n{detail.get('input_description', '')}")
                 info_right.markdown(f"**输出说明**\n\n{detail.get('output_description', '')}")
                 st.markdown(f"**数据范围**\n\n{detail.get('constraints', '')}")
-                st.dataframe(detail.get("samples", []), use_container_width=True, hide_index=True)
+                _render_cases(detail.get("samples", []))
                 st.caption(
                     f"时间 {detail.get('time_limit')} 秒 · 内存 {detail.get('memory_limit')} MB · "
                     f"难度 {detail.get('difficulty') or '未设置'}"
@@ -268,14 +320,208 @@ def problems_page() -> None:
         if not problem_list:
             st.info("请先新增题目。")
         else:
-            edit_labels = {f"{item['id']} · {item['title']}": item["id"] for item in problem_list}
-            edit_label = st.selectbox("选择题目", list(edit_labels), key="problem_edit_select")
+            edit_labels = {
+                f"{item['id']} · {item['title']}": item["id"] for item in problem_list
+            }
+            edit_label = st.selectbox(
+                "选择题目", list(edit_labels), key="problem_edit_select"
+            )
             edit_id = edit_labels[edit_label]
             try:
-                initial = _client().get(f"/api/problems/{ApiClient.path_segment(edit_id)}")
+                initial = _client().get(
+                    f"/api/problems/{ApiClient.path_segment(edit_id)}"
+                )
                 _problem_editor(prefix=f"edit_{edit_id}", initial=initial, editing=True)
             except ApiError as error:
                 _show_error(error)
+
+
+def _render_ai_result(detail: Mapping[str, Any]) -> None:
+    """展示已校验的 AI 题目，并允许进入人工审阅后的正式保存流程。"""
+
+    result = detail.get("result")
+    if not isinstance(result, dict):
+        return
+    st.subheader(f"{result.get('id', '')} · {result.get('title', '')}")
+    st.write(result.get("description", ""))
+    preview_left, preview_right = st.columns(2)
+    preview_left.markdown(f"**输入说明**\n\n{result.get('input_description', '')}")
+    preview_right.markdown(f"**输出说明**\n\n{result.get('output_description', '')}")
+    _render_cases(result.get("samples", []))
+    _render_cases(result.get("testcases", []), heading="测试点")
+    st.caption(
+        f"难度 {result.get('difficulty') or '未设置'} · "
+        f"样例 {len(result.get('samples') or [])} · "
+        f"测试点 {len(result.get('testcases') or [])}"
+    )
+    if st.button("载入审阅表单", icon=":material/edit_document:", type="primary"):
+        # 草稿只保存在当前 Streamlit 会话；正式持久化仍调用题目 CRUD API。
+        st.session_state["ai_problem_draft"] = result
+        st.success("已载入下方审阅表单，请核对题面和测试点后保存。")
+    draft = st.session_state.get("ai_problem_draft")
+    if isinstance(draft, dict):
+        _problem_editor(
+            prefix=f"ai_{detail.get('task_id', 'draft')}_{detail.get('current_round', 1)}",
+            initial=draft,
+            editing=detail.get("result_action") == "update",
+        )
+
+
+def _render_ai_task(task_id: str) -> None:
+    """轮询任务并分别呈现阶段、用量、取消、结果和追问入口。"""
+
+    try:
+        detail = _client().get(f"/api/ai/problem-tasks/{ApiClient.path_segment(task_id)}")
+    except ApiError as error:
+        _show_error(error)
+        return
+    if not isinstance(detail, dict):
+        st.error("AI 任务响应缺少状态信息。")
+        return
+    status = str(detail.get("status", ""))
+    active = status in {"pending", "running"}
+    st.session_state["active_ai_task_running"] = active
+    progress = detail.get("progress") if isinstance(detail.get("progress"), dict) else {}
+    usage = detail.get("usage") if isinstance(detail.get("usage"), dict) else {}
+    status_left, status_middle, status_right = st.columns(3)
+    status_left.metric("任务状态", status or "未知")
+    status_middle.metric("当前轮次", detail.get("current_round", 1))
+    status_right.metric(
+        "累计费用", f"{usage.get('cost', 0):.8f} {usage.get('currency', 'USD')}"
+    )
+    percent = int(progress.get("percent", 0))
+    st.progress(max(0, min(100, percent)), text=str(progress.get("message", "")))
+    token_left, token_middle, token_right = st.columns(3)
+    token_left.metric("输入 Token", usage.get("input_tokens", 0))
+    token_middle.metric("输出 Token", usage.get("output_tokens", 0))
+    token_right.metric("统计来源", usage.get("source", "estimated"))
+    st.caption(f"价格按每 {usage.get('price_unit', 1000000)} Token 计价。")
+
+    if active and st.button("中断任务", icon=":material/stop_circle:"):
+        try:
+            _client().put(
+                f"/api/ai/problem-tasks/{ApiClient.path_segment(task_id)}/cancel"
+            )
+            st.session_state["active_ai_task_running"] = False
+            st.rerun()
+        except ApiError as error:
+            _show_error(error)
+    if status == "failed" and detail.get("error_info"):
+        st.error(f"命题任务失败：{detail['error_info']}")
+    rounds = detail.get("rounds")
+    if isinstance(rounds, list):
+        with st.expander("轮次与用量", expanded=False):
+            st.dataframe(
+                [
+                    {
+                        "轮次": item.get("round"),
+                        "要求": item.get("requirement"),
+                        "状态": item.get("status"),
+                        "Token": (item.get("usage") or {}).get("total_tokens", 0),
+                        "费用": (item.get("usage") or {}).get("cost", 0),
+                    }
+                    for item in rounds if isinstance(item, dict)
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+    if status == "completed":
+        _render_ai_result(detail)
+        with st.form("ai_continue_form", clear_on_submit=True):
+            next_mode_label = st.radio(
+                "下一轮目标",
+                ["修改当前题", "另出一道新题"],
+                horizontal=True,
+                help="修改当前题会保持 ID；另出新题会强制使用不同且未占用的 ID。",
+            )
+            follow_up = st.text_area("继续修改要求", max_chars=4000)
+            continued = st.form_submit_button(
+                "开始下一轮", icon=":material/refresh:", type="primary"
+            )
+        if continued:
+            wants_new_problem = any(
+                keyword in follow_up for keyword in ("另出", "新题", "重新出题", "不同题目")
+            )
+            if wants_new_problem and next_mode_label == "修改当前题":
+                st.warning("你的要求包含新题意图；请将“下一轮目标”切换为“另出一道新题”后再提交。")
+                return
+            try:
+                _client().post(
+                    f"/api/ai/problem-tasks/{ApiClient.path_segment(task_id)}/rounds",
+                    json={
+                        "requirement": follow_up,
+                        "mode": "revise" if next_mode_label == "修改当前题" else "new",
+                    },
+                )
+                st.session_state.pop("ai_problem_draft", None)
+                st.session_state["active_ai_task_running"] = True
+                st.rerun()
+            except ApiError as error:
+                _show_error(error)
+
+
+def ai_problems_page() -> None:
+    """提交命题要求，持续观察任务，并把结果回填到题目 CRUD。"""
+
+    if _require_user() is None:
+        return
+    st.title("AI 智能命题")
+    try:
+        config = _client().get("/api/ai/model-config")
+        problems = _client().get("/api/problems/")
+    except ApiError as error:
+        _show_error(error)
+        return
+    if not isinstance(config, dict) or not config.get("configured"):
+        st.warning("AI 模型尚未由部署环境完整配置。")
+        return
+    st.caption(
+        f"模型 {config.get('model')} · {config.get('provider_url')} · "
+        f"密钥已配置：{'是' if config.get('api_key_configured') else '否'}"
+    )
+    problem_items = problems if isinstance(problems, list) else []
+    choices = {"生成新题": ""}
+    choices.update(
+        {f"改编 {item['id']} · {item['title']}": item["id"] for item in problem_items}
+    )
+    with st.form("ai_create_form"):
+        mode = st.selectbox("任务方式", list(choices))
+        requirement = st.text_area(
+            "命题要求",
+            max_chars=4000,
+            height=180,
+            placeholder="知识点、预期难度、输入规模、测试重点和其他约束",
+        )
+        created = st.form_submit_button(
+            "开始命题", icon=":material/auto_awesome:", type="primary"
+        )
+    if created:
+        payload: dict[str, Any] = {"requirement": requirement}
+        if choices[mode]:
+            payload["problem_id"] = choices[mode]
+        try:
+            result = _client().post("/api/ai/problem-tasks/", json=payload)
+            st.session_state["active_ai_task_id"] = result["task_id"]
+            st.session_state["active_ai_task_running"] = True
+            st.session_state.pop("ai_problem_draft", None)
+            st.rerun()
+        except ApiError as error:
+            _show_error(error)
+
+    task_id = str(st.session_state.get("active_ai_task_id", ""))
+    if task_id:
+        run_every = "1s" if st.session_state.get("active_ai_task_running") else None
+
+        @st.fragment(run_every=run_every)
+        def poll_ai_task() -> None:
+            """仅重跑任务区域；终态后完整 rerun 会停止定时器。"""
+
+            was_running = bool(st.session_state.get("active_ai_task_running"))
+            _render_ai_task(task_id)
+            if was_running and not st.session_state.get("active_ai_task_running"):
+                st.rerun()
+
+        poll_ai_task()
 
 
 def _render_submission_log(submission_id: str) -> None:

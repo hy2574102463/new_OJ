@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,15 @@ class Settings(BaseSettings):
     test_reset_enabled: bool = False
     session_cookie_name: str = "oj_session"
     session_ttl_seconds: int = 86400
+    # AI 密钥只从部署环境读取，并以 SecretStr 避免调试输出意外回显。
+    ai_provider_url: str = ""
+    ai_model: str = ""
+    ai_api_key: SecretStr = SecretStr("")
+    ai_input_price: float = 0.0
+    ai_output_price: float = 0.0
+    ai_price_unit: int = 1_000_000
+    ai_currency: str = "USD"
+    ai_request_timeout_seconds: float = 120.0
 
     model_config = SettingsConfigDict(
         # 未设置环境变量时读取本地 .env；示例文件本身不会被自动读取。

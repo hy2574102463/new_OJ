@@ -13,19 +13,20 @@
 | Step 1 题目管理 | 已完成 | `cce992e` | JSON CRUD、字段默认值、原子写入、启动校验、权限控制 |
 | Step 2 评测控制 | 已完成 | `1cb223d` | Python/C++、语言注册、异步提交、AC/WA/RE/CE/TLE/MLE |
 | Step 3 评测管理 | 已完成 | `ddb97dd` | 组合筛选、分页、详情权限和原 ID 重判 |
-| Step 5 评测日志 | 已完成、待提交 | 当前工作区 | 测试点明细、公开策略和访问审计 |
-| Step 6 | 已完成、待提交 | 当前工作区 | Streamlit API 客户端、账户/题目/提交与管理员页面 |
-| Advance | 可选、未开始 | - | AI 配置、任务进度、取消和费用统计 |
+| Step 5 评测日志 | 已完成 | 当前工作区 | 测试点明细、公开策略和访问审计 |
+| Step 6 | 已完成 | 当前工作区 | Streamlit API 客户端、账户/题目/提交与管理员页面 |
+| Advance | 已完成 | 当前工作区 | OpenAI-compatible 多轮命题、进度/取消、Token 与费用、题目回填 |
 
-当前完整测试基线是 **107 passed, 2 warnings**。Step 6 新增客户端、会话状态、表单转换和 Streamlit `AppTest` 覆盖；两条既有 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响现有功能。
+当前完整测试基线包含 AI 模块测试；两条既有 warning 来自 FastAPI/Starlette `TestClient` 的上游弃用提示，不影响功能。
 
-下一步是验收准备，或按需进入可选 Advance。前端只保存 Session Cookie 并调用现有 HTTP 接口，不直接读取 SQLite 或题目 JSON。
+下一步是验收准备。前端只保存 Session Cookie 并调用现有 HTTP 接口，不直接读取 SQLite 或题目 JSON。
 
 ### 当前已知边界
 
 - 题目文件的并发锁仅在单个应用进程内生效；当前阶段不支持多个 Uvicorn worker 同时写同一道题。
 - `POST /api/reset/` 只允许测试环境使用，会清空测试数据并重建初始管理员，不能作为生产管理接口。
 - Streamlit 进程重启会丢失其内存中的浏览器会话客户端，用户需要重新登录；Cookie 不写入本地文件。
+- AI 模型统一由 `OJ_AI_*` 环境变量配置。密钥使用 `SecretStr`，只在服务端请求头中使用，不进入任务表、日志或普通响应。
 - 评测隔离是适合课程验收的进程工作目录、进程组清理和资源监控，不等同于容器或虚拟机安全边界；不要把服务直接暴露给不受信任的公网用户。
 - 默认管理员凭据只用于课程初始验收；部署到真实环境前必须增加安全的改密或初始化流程。
 
@@ -213,7 +214,7 @@ tests/                    # API、权限、评测器和前端冒烟测试
 | P4 Step 4 | 已完成 | bcrypt 密码、Session 登录登出、角色依赖、禁用用户、用户接口 | 未登录 401、越权 403，初始 `admin/admintestpassword` 自动创建 |
 | P5 Step 5 | 已完成、待提交 | CaseResult 日志、题目 `public_cases`、访问审计接口 | 本人/管理员/公开场景可见性与审计状态正确 |
 | P6 Step 6 | 已完成、待提交 | Streamlit 三组页面、统一 API 客户端、会话和轮询 | 页面不绕过 API，能完成注册→建题→提交→看结果闭环 |
-| P7 Advance（可选） | 未开始 | AI 配置、后台任务、进度/SSE 或轮询、取消、用量计费、结果导入题目表单 | 任务可观察、可中断，密钥不回显，费用依据可解释 |
+| P7 Advance | 已完成 | OpenAI-compatible 多轮任务、轮询、真实取消、用量计费、结果导入题目表单 | 任务可观察、可中断，密钥不回显，费用依据可解释 |
 | P8 验收 | 未开始 | 集成测试、边界/安全测试、演示数据、报告和提交检查 | 覆盖评分点，Conventional Commits，9 月 10 日前提交 commit 与报告 |
 
 开发顺序应保持依赖关系：先后端契约和权限，再评测器，最后前端；每阶段完成后打可回滚的 Conventional Commit（如 `feat(judge): add timeout monitor`）。
@@ -225,7 +226,7 @@ tests/                    # API、权限、评测器和前端冒烟测试
 - 语言：`/api/languages/` 注册和查询；注册需登录，命令模板必须校验并限制执行范围。
 - 用户：`/api/users/` 注册/列表、`/api/users/{id}` 信息、`/role` 角色；登录、登出位于 `/api/auth/*`。
 - 日志：`/api/submissions/{id}/log`、题目日志可见性、`/api/logs/access/`；记录成功及权限拒绝访问。
-- AI：模型配置、任务创建/状态/events/cancel；任务创建者或管理员可访问。
+- AI：`GET /api/ai/model-config`、`POST /api/ai/problem-tasks/`、任务状态查询、`/rounds` 追问和 `/cancel`；任务创建者或管理员可访问。首版使用轮询，不提供 SSE。
 
 统一处理参数校验（FastAPI 默认 422 转为 400）、认证顺序（401→403→400→429→409→404→500）和安全错误信息。所有 API 响应必须包含 `{code,msg,data}`，且 `code` 与 HTTP 状态码一致。提交频率限制为 1 分钟内最多 3 次，超出返回 429。
 
@@ -247,6 +248,6 @@ tests/                    # API、权限、评测器和前端冒烟测试
 
 FastAPI 使用 `.venv/bin/python -m uvicorn app.main:app --reload` 启动；Streamlit 使用 `.venv/bin/python -m streamlit run app/frontend/app.py` 启动。运行时数据、编译产物、模型密钥和大文件不得提交 Git；提交信息遵循 Conventional Commits。截止节点以指南为准：9 月 10 日课前完成代码并提交最后一次 commit，报告于当日 23:59 前提交。
 
-AI 进阶输入应能表达知识点、预期难度和其他约束，结果须可用于题目新增/编辑，不能只返回脱离系统的压缩包或文本。任务状态至少区分等待、执行、完成、中断、失败；进度必须在执行期间持续展示，取消必须真实终止或阻止后台任务继续执行。模型配置至少包含提供商 URL、模型名、密钥并实际生效；输入/输出 Token 应分别统计，费用公式、计价单位及估算限制需展示。工具调用、Agent Loop、检索和脚本生成均为可选设计。
+AI 命题页面支持生成新题或引用已有题目改编，后续每轮显式选择“修改当前题”或“另出一道新题”：前者由程序强制保持 ID，后者强制使用不同且未占用的 ID。System Prompt 位于 `app/services/ai_prompts.py`，程序会将轮次意图作为结构化 `operation` 一并发送；即使模型误解，后端仍按轮次规则拒绝错误 ID，并自动请求一次修正。完成后先载入现有题目审阅表单，再根据当前结果是否已存在选择题目 CRUD 的新增或编辑接口。模型采用 OpenAI-compatible `chat/completions`，配置变量为 `OJ_AI_PROVIDER_URL`、`OJ_AI_MODEL`、`OJ_AI_API_KEY`、`OJ_AI_INPUT_PRICE`、`OJ_AI_OUTPUT_PRICE`、`OJ_AI_PRICE_UNIT`、`OJ_AI_CURRENCY` 和 `OJ_AI_REQUEST_TIMEOUT_SECONDS`。任务状态为 `pending/running/completed/cancelled/failed`；页面每秒轮询，取消会先原子写入 `cancelled` 再取消 HTTP 协程。输入/输出 Token 分开记录，费用为 `input/price_unit*input_price + output/price_unit*output_price`；提供商没有 usage 时采用每四字符一个 Token 的估算并标记来源。首版不执行外部工具、检索或用户脚本。
 
 详细接口字段和异常以 [`oj/api.md`](oj/api.md) 为准；遇到歧义，先保持该契约，再在本文档记录设计决策。

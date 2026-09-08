@@ -6,6 +6,7 @@ import streamlit as st
 try:
     from .pages import (
         account_page,
+        ai_problems_page,
         audits_page,
         problems_page,
         submissions_page,
@@ -15,6 +16,7 @@ try:
 except ImportError:  # 直接执行 app/frontend/app.py 时没有 Python 包上下文。
     from pages import (
         account_page,
+        ai_problems_page,
         audits_page,
         problems_page,
         submissions_page,
@@ -31,11 +33,16 @@ def main() -> None:
     pages: dict[str, list[st.Page]] = {
         "账户": [st.Page(account_page, title="账户", icon=":material/account_circle:")]
     }
+    # 页面入口始终存在，避免匿名用户访问 Streamlit 页面路由时得到页面层 404；
+    # 页面内部仍由 _require_user 和后端 API 分别执行提示与真正鉴权。
+    pages["在线评测"] = [
+        st.Page(problems_page, title="题目", icon=":material/menu_book:"),
+        st.Page(submissions_page, title="提交", icon=":material/code:"),
+    ]
+    pages["智能命题"] = [
+        st.Page(ai_problems_page, title="AI 命题", icon=":material/auto_awesome:")
+    ]
     if isinstance(user, dict):
-        pages["在线评测"] = [
-            st.Page(problems_page, title="题目", icon=":material/menu_book:"),
-            st.Page(submissions_page, title="提交", icon=":material/code:"),
-        ]
         if user.get("role") == "admin":
             pages["管理"] = [
                 st.Page(users_page, title="用户管理", icon=":material/group:"),

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.ai import router as ai_router
 from app.api.auth import router as auth_router
 from app.api.languages import router as languages_router
 from app.api.logs import router as logs_router
@@ -17,12 +18,14 @@ from app.core.http import register_http_conventions
 from app.core.logging import configure_logging
 from app.judge.runner import JudgeRunner
 from app.repositories.database import Database
+from app.repositories.ai import AIRepository
 from app.repositories.languages import LanguageRepository
 from app.repositories.logs import LogRepository
 from app.repositories.problems import ProblemRepository
 from app.repositories.submissions import SubmissionRepository
 from app.repositories.users import UserRepository
 from app.services.auth import AuthService
+from app.services.ai import AIService
 from app.services.languages import LanguageService
 from app.services.logs import LogService
 from app.services.problems import ProblemService
@@ -46,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     language_repository = LanguageRepository(database)
     submission_repository = SubmissionRepository(database)
     log_repository = LogRepository(database)
+    ai_repository = AIRepository(database)
     auth_service = AuthService(resolved_settings, user_repository)
     user_service = UserService(auth_service, user_repository)
     problem_service = ProblemService(problem_repository)
@@ -59,6 +63,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     log_service = LogService(
         submission_repository, problem_repository, log_repository
     )
+    ai_service = AIService(
+        resolved_settings, ai_repository, problem_repository
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -68,11 +75,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await database.initialize()
         await language_service.ensure_defaults()
         await submission_service.initialize()
+        await ai_service.initialize()
         await problem_repository.initialize()
         await auth_service.ensure_initial_admin()
         try:
             yield
         finally:
+            await ai_service.shutdown()
             await submission_service.shutdown()
 
     application = FastAPI(title="OJ API", version="0.1.0", lifespan=lifespan)
@@ -87,6 +96,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.submission_service = submission_service
     application.state.log_repository = log_repository
     application.state.log_service = log_service
+    application.state.ai_repository = ai_repository
+    application.state.ai_service = ai_service
     application.state.auth_service = auth_service
     application.state.user_service = user_service
     application.state.system_service = SystemService(
@@ -96,6 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         problem_repository,
         language_service,
         submission_service,
+        ai_service,
     )
     register_http_conventions(application)
     application.include_router(system_router)
@@ -105,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(submissions_router)
     application.include_router(logs_router)
     application.include_router(problems_router)
+    application.include_router(ai_router)
     return application
 
 

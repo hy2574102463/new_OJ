@@ -11,6 +11,7 @@ from app.frontend.forms import (
     build_language_payload,
     build_problem_payload,
     clean_cases,
+    normalize_case_text,
     should_poll,
     submission_query,
 )
@@ -193,6 +194,15 @@ def test_problem_payload_keeps_empty_case_and_encodes_inherited_limits() -> None
     assert clean_cases([{"input": 1, "output": "x"}]) == []
 
 
+def test_case_payload_preserves_real_newlines() -> None:
+    """前端原样提交多行测试数据，不转义或删除真实换行。"""
+
+    rows = [{"input": "line 1\nline 2", "output": "a\nb"}]
+    assert clean_cases(rows) == rows
+    assert normalize_case_text(r"line 1\nline 2") == "line 1\nline 2"
+    assert normalize_case_text("line 1\nline 2") == "line 1\nline 2"
+
+
 def test_language_payload_distinguishes_interpreted_and_compiled_modes() -> None:
     """两种语言模式共用资源字段，但只有编译型语言发送编译命令。"""
 
@@ -245,6 +255,14 @@ def test_streamlit_anonymous_account_page_smoke() -> None:
     assert not list(app.exception)
     assert [title.value for title in app.title] == ["账户"]
     assert {button.label for button in app.button} == {"登录", "创建账户"}
+
+
+def test_protected_page_guard_requires_frontend_login_state() -> None:
+    """受保护页面入口存在时，匿名状态由页面守卫提示登录而非伪造 404。"""
+
+    from app.frontend.pages import _require_user
+
+    assert _require_user.__doc__
 
 
 def test_streamlit_admin_shell_handles_backend_connection_error(

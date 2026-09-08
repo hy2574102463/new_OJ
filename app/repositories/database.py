@@ -148,6 +148,75 @@ MIGRATIONS = (
             "CREATE INDEX log_audits_problem_idx ON log_access_audits(problem_id)",
         ),
     ),
+    Migration(
+        version=6,
+        name="add_ai_problem_tasks",
+        statements=(
+            """
+            CREATE TABLE ai_tasks (
+                task_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                problem_id TEXT,
+                status TEXT NOT NULL CHECK (
+                    status IN ('pending', 'running', 'completed', 'cancelled', 'failed')
+                ),
+                progress_percent INTEGER NOT NULL CHECK (
+                    progress_percent BETWEEN 0 AND 100
+                ),
+                progress_message TEXT NOT NULL,
+                result_json TEXT,
+                error_info TEXT,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cost TEXT NOT NULL DEFAULT '0',
+                usage_source TEXT NOT NULL DEFAULT 'estimated' CHECK (
+                    usage_source IN ('provider', 'estimated', 'mixed')
+                ),
+                current_round INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX ai_tasks_user_created_idx ON ai_tasks(user_id, created_at)",
+            """
+            CREATE TABLE ai_task_rounds (
+                task_id TEXT NOT NULL,
+                round_index INTEGER NOT NULL CHECK (round_index > 0),
+                requirement TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (
+                    status IN ('pending', 'running', 'completed', 'cancelled', 'failed')
+                ),
+                progress_percent INTEGER NOT NULL CHECK (
+                    progress_percent BETWEEN 0 AND 100
+                ),
+                progress_message TEXT NOT NULL,
+                result_json TEXT,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cost TEXT NOT NULL DEFAULT '0',
+                usage_source TEXT NOT NULL DEFAULT 'estimated' CHECK (
+                    usage_source IN ('provider', 'estimated', 'mixed')
+                ),
+                created_at TEXT NOT NULL,
+                finished_at TEXT,
+                PRIMARY KEY (task_id, round_index),
+                FOREIGN KEY (task_id) REFERENCES ai_tasks(task_id) ON DELETE CASCADE
+            )
+            """,
+        ),
+    ),
+    Migration(
+        version=7,
+        name="add_ai_round_mode",
+        statements=(
+            """
+            ALTER TABLE ai_task_rounds
+            ADD COLUMN mode TEXT NOT NULL DEFAULT 'revise'
+            CHECK (mode IN ('revise', 'new'))
+            """,
+        ),
+    ),
 )
 
 

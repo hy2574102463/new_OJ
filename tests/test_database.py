@@ -59,10 +59,13 @@ async def test_existing_p0_database_upgrades_to_current_schema(tmp_path: Path) -
             "WHERE type = 'table' AND name = 'log_access_audits'"
         )
         audits_table = await cursor.fetchone()
+        cursor = await connection.execute("PRAGMA table_info(ai_task_rounds)")
+        ai_round_columns = {str(row["name"]) for row in await cursor.fetchall()}
 
-    assert versions == [1, 2, 3, 4, 5]
+    assert versions == [1, 2, 3, 4, 5, 6, 7]
     assert users_table is not None
     assert audits_table is not None
+    assert "mode" in ai_round_columns
 
 
 @pytest.mark.asyncio
@@ -107,6 +110,8 @@ async def test_reset_removes_application_tables_and_reapplies_migrations(
         names = [row["name"] for row in await cursor.fetchall()]
 
     assert names == [
+        "ai_task_rounds",
+        "ai_tasks",
         "case_results",
         "languages",
         "log_access_audits",

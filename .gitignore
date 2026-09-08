@@ -1,4 +1,5 @@
 oj/
+.vscode/
 
 # Local Python environments and caches
 .venv/
